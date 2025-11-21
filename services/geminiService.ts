@@ -1,18 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Add this type definition so TypeScript knows about import.meta.env
-interface ImportMetaEnv {
-  VITE_API_KEY: string;
-}
-
-interface ImportMeta {
-  env: ImportMetaEnv;
-}
-
 const getAiClient = () => {
+  // Use Vite's env variable access
   const apiKey = (import.meta as any).env.VITE_API_KEY;
   if (!apiKey) {
-    console.error("AIzaSyD6A9rdRbU-6cN0swCK12WqTZB_Hn2dwvU is missing");
+    console.error("API_KEY is missing");
   }
   return new GoogleGenerativeAI(apiKey);
 };
@@ -44,6 +36,6 @@ export const generateNPCResponse = async (
     return result.response.text() || "...";
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return "Hello there! I'm happy to see you in here.";
+    return "*looks confused* I'm having a bit of trouble understanding the wind right now.";
   }
 };
