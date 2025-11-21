@@ -487,6 +487,7 @@ interface GameCanvasProps {
     broadcastMessage: { text: string, id: string } | null;
     onRemoteChat: (sender: string, text: string) => void;
     micStream: MediaStream | null;
+    onPlayerListUpdate?: (players: string[]) => void;
 }
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
@@ -496,7 +497,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     setNearbyNPC,
     broadcastMessage,
     onRemoteChat,
-    micStream
+    micStream,
+    onPlayerListUpdate
 }) => {
   const playerPosRef = useRef(new THREE.Vector3(0, 0, 0));
   const isMovingRef = useRef(false); 
@@ -516,8 +518,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const [sendChat, getChat] = room.makeAction('chat');
       const [sendBall, getBall] = room.makeAction('ball');
       
-      getState((data: PlayerSyncData, peerId: string) => {
-          setRemotePeers(prev => ({ ...prev, [peerId]: { ...data, id: peerId } }));
+      getState((data: any, peerId: string) => {
+          // Cast incoming data to PlayerSyncData
+          setRemotePeers(prev => ({ ...prev, [peerId]: { ...(data as PlayerSyncData), id: peerId } }));
       });
       
       getChat((data: { text: string, sender: string }, peerId: string) => {
@@ -555,7 +558,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               isMicOn: !!micStream,
               timestamp: Date.now()
           };
-          sendState(myData);
+          // Cast outgoing data to any for Trystero
+          sendState(myData as any);
       }, 50);
       
       (window as any).__sendChat = sendChat;
@@ -591,6 +595,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           });
       }
   }, [broadcastMessage]);
+
+  // Sync player list to parent
+  useEffect(() => {
+      if (onPlayerListUpdate) {
+          const names = Object.values(remotePeers).map(p => p.user.name);
+          onPlayerListUpdate(names);
+      }
+  }, [remotePeers, onPlayerListUpdate]);
 
   const handleLocalUpdate = (rotation: number, moving: boolean) => {
       rotationRef.current = rotation;
