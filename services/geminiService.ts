@@ -12,7 +12,7 @@ interface ImportMeta {
 const getAiClient = () => {
   const apiKey = (import.meta as any).env.VITE_API_KEY;
   if (!apiKey) {
-    console.error("API_KEY is missing");
+    console.error("AIzaSyD6A9rdRbU-6cN0swCK12WqTZB_Hn2dwvU is missing");
   }
   return new GoogleGenerativeAI(apiKey);
 };
@@ -44,6 +44,6 @@ export const generateNPCResponse = async (
     return result.response.text() || "...";
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return "*looks confused* I'm having a bit of trouble understanding the wind right now.";
+    return "Hello there! I'm happy to see you in here.";
   }
 };
