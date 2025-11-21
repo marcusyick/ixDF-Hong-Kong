@@ -518,9 +518,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const [sendChat, getChat] = room.makeAction('chat');
       const [sendBall, getBall] = room.makeAction('ball');
       
-      getState((data: any, peerId: string) => {
-          // Cast incoming data to PlayerSyncData
-          setRemotePeers(prev => ({ ...prev, [peerId]: { ...(data as PlayerSyncData), id: peerId } }));
+      getState((data: PlayerSyncData, peerId: string) => {
+          setRemotePeers(prev => ({ ...prev, [peerId]: { ...data, id: peerId } }));
       });
       
       getChat((data: { text: string, sender: string }, peerId: string) => {
@@ -558,8 +557,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               isMicOn: !!micStream,
               timestamp: Date.now()
           };
-          // Cast outgoing data to any for Trystero
-          sendState(myData as any);
+          sendState(myData);
       }, 50);
       
       (window as any).__sendChat = sendChat;

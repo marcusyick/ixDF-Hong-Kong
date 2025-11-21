@@ -1,4 +1,3 @@
-export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 import { ThreeElements } from '@react-three/fiber';
 
 declare global {
