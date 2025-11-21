@@ -12,6 +12,7 @@ function App() {
   const [nearbyNPC, setNearbyNPC] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  const [remoteUsers, setRemoteUsers] = useState<string[]>([]);
   
   // Multiplayer Chat Signals
   const [broadcastMessage, setBroadcastMessage] = useState<{text: string, id: string} | null>(null);
@@ -170,6 +171,7 @@ function App() {
         broadcastMessage={broadcastMessage}
         onRemoteChat={handleRemoteChat}
         micStream={micStream}
+        onPlayerListUpdate={setRemoteUsers}
       />
       <UIOverlay 
         user={user}
@@ -179,6 +181,7 @@ function App() {
         isListening={isListening}
         nearbyNPC={nearbyNPC}
         onSwitchCharacter={handleSwitchCharacter}
+        onlineUsers={[user.name, ...remoteUsers]}
       />
     </div>
   );

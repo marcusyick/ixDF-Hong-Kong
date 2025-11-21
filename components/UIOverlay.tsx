@@ -10,6 +10,7 @@ interface UIOverlayProps {
   isListening: boolean;
   nearbyNPC: string | null;
   onSwitchCharacter: () => void;
+  onlineUsers: string[];
 }
 
 const EMOJI_LIST = ['😀', '😂', '😍', '😎', '🤔', '😭', '😡', '👍', '👎', '👋', '🙏', '❤️', '🎉', '🔥', '🌿', '🇭🇰'];
@@ -20,7 +21,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onMicToggle,
   isListening,
   nearbyNPC,
-  onSwitchCharacter
+  onSwitchCharacter,
+  onlineUsers
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -44,7 +46,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* Top Bar */}
       <div className="p-4 pointer-events-auto flex justify-between items-start">
         {/* Left: Info */}
-        <div className="bg-white/80 backdrop-blur-sm p-3 rounded-xl shadow-lg inline-block border border-white/40">
+        <div className="bg-white/80 backdrop-blur-sm p-3 rounded-xl shadow-lg inline-block border border-white/40 w-64">
           <h1 className="font-bold text-lg text-garden-800 flex items-center gap-2">
             <span className="text-2xl">🇭🇰</span> IxDF Hong Kong
           </h1>
@@ -54,6 +56,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
            <div className="mt-2 text-xs text-gray-500 flex flex-col gap-1">
               <span className='flex items-center gap-1'><span className="kbd font-mono bg-gray-100 px-1 rounded border border-gray-300">WASD / Arrows</span> to move</span>
               <span className='flex items-center gap-1'><span className="kbd font-mono bg-gray-100 px-1 rounded border border-gray-300">Space</span> to jump</span>
+          </div>
+          
+          {/* Online Users List */}
+          <div className="mt-3 pt-3 border-t border-gray-200/50">
+            <h3 className="text-xs font-bold text-garden-800 mb-1 flex items-center gap-1">
+                <Users size={12} />
+                Online Gardeners ({onlineUsers.length})
+            </h3>
+            <div className="max-h-32 overflow-y-auto scrollbar-hide">
+                {onlineUsers.map((name, i) => (
+                    <div key={i} className="text-xs text-gray-600 flex items-center gap-1.5 py-0.5">
+                        <div className={`w-1.5 h-1.5 rounded-full ${name === user.name ? 'bg-garden-500' : 'bg-green-400'} animate-pulse`}></div>
+                        <span className="truncate max-w-[180px]">{name}</span> {name === user.name && <span className="text-gray-400 text-[10px]">(You)</span>}
+                    </div>
+                ))}
+            </div>
           </div>
         </div>
 
