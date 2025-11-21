@@ -2,7 +2,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const getAiClient = () => {
   // Use Vite's env variable access
-  const apiKey = (import.meta as any).env.VITE_API_KEY;
+  const apiKey = import.meta.env.VITE_API_KEY;
+  console.log("Loaded API Key:", apiKey);
   if (!apiKey) {
     console.error("API_KEY is missing");
   }
