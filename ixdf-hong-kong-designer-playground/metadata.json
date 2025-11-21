@@ -1,0 +1,7 @@
+{
+  "name": "IxDF Hong Kong Designer Playground",
+  "description": "A 3D social garden with AI-powered NPCs and character customization.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
