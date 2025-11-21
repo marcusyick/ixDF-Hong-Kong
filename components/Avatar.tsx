@@ -1,20 +1,12 @@
 import React, { useRef } from 'react';
 import { useFrame, ThreeElements } from '@react-three/fiber';
 import { Group } from 'three';
-import { CharacterType } from '../types';
-
-// Fix for missing JSX types in this environment
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
+import { CharacterType, Accessory } from '../types';
 
 interface AvatarProps {
   type: CharacterType;
   color: string;
+  accessory?: Accessory;
   position?: [number, number, number];
   rotation?: [number, number, number];
   isMoving?: boolean;
@@ -46,7 +38,111 @@ const Face = () => (
   </group>
 );
 
-const Avatar: React.FC<AvatarProps> = ({ type, color, position = [0, 0, 0], rotation = [0, 0, 0], isMoving = false, scale = 1, withShadow = true }) => {
+const PartyHat = () => (
+  <group position={[0, 0.85, 0]} rotation={[0.2, 0, -0.1]}>
+      <mesh position={[0, 0.25, 0]}>
+          <coneGeometry args={[0.2, 0.5, 32]} />
+          <meshStandardMaterial color="#f472b6" />
+      </mesh>
+      <mesh position={[0, 0, 0]}>
+          <torusGeometry args={[0.2, 0.03, 8, 32]} />
+          <meshStandardMaterial color="#fbbf24" />
+      </mesh>
+      <mesh position={[0, 0.5, 0]}>
+          <sphereGeometry args={[0.06]} />
+          <meshStandardMaterial color="#fbbf24" />
+      </mesh>
+  </group>
+);
+
+const Sunglasses = () => (
+    <group position={[0, 0.4, 0.5]}>
+        {/* Lenses */}
+        <mesh position={[-0.18, 0, 0]}>
+            <boxGeometry args={[0.18, 0.12, 0.05]} />
+            <meshStandardMaterial color="black" roughness={0.1} />
+        </mesh>
+        <mesh position={[0.18, 0, 0]}>
+            <boxGeometry args={[0.18, 0.12, 0.05]} />
+            <meshStandardMaterial color="black" roughness={0.1} />
+        </mesh>
+        {/* Bridge */}
+        <mesh position={[0, 0, 0]}>
+            <boxGeometry args={[0.1, 0.02, 0.04]} />
+            <meshStandardMaterial color="#333" />
+        </mesh>
+        {/* Arms */}
+        <mesh position={[-0.3, 0, -0.2]} rotation={[0, -0.2, 0]}>
+             <boxGeometry args={[0.02, 0.02, 0.4]} />
+             <meshStandardMaterial color="#333" />
+        </mesh>
+        <mesh position={[0.3, 0, -0.2]} rotation={[0, 0.2, 0]}>
+             <boxGeometry args={[0.02, 0.02, 0.4]} />
+             <meshStandardMaterial color="#333" />
+        </mesh>
+    </group>
+);
+
+const Balloon = ({ isMoving }: { isMoving: boolean }) => {
+    const wrapperRef = useRef<Group>(null);
+    const headRef = useRef<Group>(null);
+
+    useFrame((state, delta) => {
+        const t = state.clock.elapsedTime;
+
+        if (wrapperRef.current) {
+            // Drag Physics: Tilt the whole string backwards when moving
+            // Since face is +Z, tilting Backwards means tilting towards -Z.
+            // Right Hand Rule: Negative X rotation tilts +Y towards -Z.
+            const targetTiltX = isMoving ? -0.6 : 0; 
+            // Add a slight side swing when moving
+            const targetTiltZ = isMoving ? Math.sin(t * 10) * 0.1 : 0;
+
+            // Smoothly interpolate (Lerp) to the target tilt for "weight" feeling
+            const lerpSpeed = 4 * delta;
+            wrapperRef.current.rotation.x += (targetTiltX - wrapperRef.current.rotation.x) * lerpSpeed;
+            wrapperRef.current.rotation.z += (targetTiltZ - wrapperRef.current.rotation.z) * lerpSpeed;
+
+            // Wind Sway: Always active but subtle
+            const windSway = Math.sin(t * 2.5) * 0.08;
+            wrapperRef.current.rotation.z += windSway * delta;
+        }
+
+        if (headRef.current) {
+             // Turbulence: The balloon head wobbles relative to the string
+             // Stronger and faster when moving
+             const wobbleSpeed = isMoving ? 12 : 2;
+             const wobbleAmp = isMoving ? 0.15 : 0.03;
+             
+             headRef.current.rotation.z = Math.sin(t * wobbleSpeed) * wobbleAmp;
+             headRef.current.rotation.x = Math.cos(t * (wobbleSpeed * 0.9)) * wobbleAmp;
+        }
+    })
+
+    return (
+        <group ref={wrapperRef} position={[0.6, 0.2, 0.2]}>
+            {/* String (Pivot is at 0,0,0) */}
+            <mesh position={[0, 0.5, 0]}>
+                <cylinderGeometry args={[0.005, 0.005, 1]} />
+                <meshBasicMaterial color="white" />
+            </mesh>
+            {/* Balloon Head */}
+            <group ref={headRef} position={[0, 1, 0]}>
+                <mesh>
+                    <sphereGeometry args={[0.25, 32, 32]} />
+                    <meshStandardMaterial color="#ef4444" roughness={0.2} metalness={0.1} />
+                </mesh>
+                {/* Knot */}
+                <mesh position={[0, -0.25, 0]}>
+                    <coneGeometry args={[0.05, 0.05, 8]} />
+                    <meshStandardMaterial color="#ef4444" />
+                </mesh>
+            </group>
+        </group>
+    )
+}
+
+const Avatar: React.FC<AvatarProps> = ({ type, color, accessory = Accessory.NONE, position = [0, 0, 0], rotation = [0, 0, 0], isMoving = false, scale = 1, withShadow = true }) => {
   const groupRef = useRef<Group>(null);
   const bodyRef = useRef<Group>(null);
   const leftFootRef = useRef<Group>(null);
@@ -78,11 +174,11 @@ const Avatar: React.FC<AvatarProps> = ({ type, color, position = [0, 0, 0], rota
         bodyRef.current.position.y = Math.sin(t * 2) * 0.02 + 0.7;
         bodyRef.current.rotation.z = 0;
       }
-      // Reset Feet
+      // Reset Feet - Align them side by side
       if (leftFootRef.current && rightFootRef.current) {
-        leftFootRef.current.position.z = 0.15;
+        leftFootRef.current.position.z = 0;
         leftFootRef.current.position.y = 0;
-        rightFootRef.current.position.z = -0.15;
+        rightFootRef.current.position.z = 0;
         rightFootRef.current.position.y = 0;
       }
     }
@@ -164,6 +260,11 @@ const Avatar: React.FC<AvatarProps> = ({ type, color, position = [0, 0, 0], rota
         
         {type !== CharacterType.ROBOT && <Face />}
         {renderAccessories()}
+        
+        {/* User Selected Accessory */}
+        {accessory === Accessory.HAT && <PartyHat />}
+        {accessory === Accessory.GLASSES && <Sunglasses />}
+        {accessory === Accessory.BALLOON && <Balloon isMoving={isMoving} />}
         
         {/* Floating Hand Nubs */}
         <mesh position={[-0.5, 0, 0]}>

@@ -1,3 +1,11 @@
+import { ThreeElements } from '@react-three/fiber';
+
+declare global {
+  namespace JSX {
+    interface IntrinsicElements extends ThreeElements {}
+  }
+}
+
 export enum CharacterType {
   RABBIT = 'Rabbit',
   BEAR = 'Bear',
@@ -5,10 +13,18 @@ export enum CharacterType {
   ROBOT = 'Robot'
 }
 
+export enum Accessory {
+  NONE = 'None',
+  HAT = 'Party Hat',
+  GLASSES = 'Sunglasses',
+  BALLOON = 'Balloon'
+}
+
 export interface UserState {
   name: string;
   characterType: CharacterType;
   color: string;
+  accessory: Accessory;
 }
 
 export interface ChatMessage {
@@ -28,6 +44,7 @@ export interface NPCData {
   persona: string; // System instruction for this specific NPC
   useThinking?: boolean; // Whether to use high-reasoning model
   wanderRadius?: number;
+  accessory?: Accessory;
 }
 
 export interface Collider {

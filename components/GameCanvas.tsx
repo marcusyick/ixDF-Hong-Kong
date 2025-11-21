@@ -10,14 +10,6 @@ import Avatar from './Avatar';
 import { UserState, NPCData, ChatMessage, Collider, PlayerSyncData } from '../types';
 import { NPC_LIST } from '../constants';
 
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
-
 function usePlayerControls() {
   const [movement, setMovement] = useState({ forward: false, backward: false, left: false, right: false, shift: false, jump: false });
   useEffect(() => {
@@ -101,31 +93,71 @@ const StreamAudio = ({ stream }: { stream: MediaStream }) => {
     return <positionalAudio ref={sound} />
 };
 
-const KickableBall = ({ playerPosRef }: { playerPosRef: React.MutableRefObject<THREE.Vector3> }) => {
+interface KickableBallProps {
+    playerPosRef: React.MutableRefObject<THREE.Vector3>;
+    onKick?: (velocity: number[], position: number[]) => void;
+    remoteBallState?: { velocity: number[], position: number[], timestamp: number } | null;
+}
+
+const KickableBall = ({ playerPosRef, onKick, remoteBallState }: KickableBallProps) => {
     const ballRef = useRef<THREE.Mesh>(null);
     const velocity = useRef(new THREE.Vector3(0, 0, 0));
+    const lastKickTime = useRef(0);
+    const lastSyncTime = useRef(0);
     
     useFrame((state, delta) => {
         if (!ballRef.current || !playerPosRef.current) return;
+        
         const ballPos = ballRef.current.position;
+        
+        // --- SYNC LOGIC ---
+        // If we have a remote update that is newer than our last processed sync
+        if (remoteBallState && remoteBallState.timestamp > lastSyncTime.current) {
+            // Update local ball to match remote state (Dead Reckoning Snap)
+            ballPos.set(remoteBallState.position[0], remoteBallState.position[1], remoteBallState.position[2]);
+            velocity.current.set(remoteBallState.velocity[0], remoteBallState.velocity[1], remoteBallState.velocity[2]);
+            lastSyncTime.current = remoteBallState.timestamp;
+        }
+
+        // --- PHYSICS LOGIC ---
         const playerPos = playerPosRef.current;
         const dist = ballPos.distanceTo(playerPos);
         const KICK_RADIUS = 1.2;
         const KICK_FORCE = 10;
+        const now = Date.now();
+        
+        // Local collision detection (Kicking)
         if (dist < KICK_RADIUS) {
             const direction = new THREE.Vector3().subVectors(ballPos, playerPos).normalize();
             direction.y = 0;
+            
+            // Apply force locally
             velocity.current.add(direction.multiplyScalar(KICK_FORCE * delta));
+            
+            // Broadcast kick event to others (with throttling to prevent flood)
+            if (onKick && (now - lastKickTime.current > 100)) {
+                onKick(velocity.current.toArray(), ballPos.toArray());
+                lastKickTime.current = now;
+            }
         }
+
+        // Movement integration
         ballPos.add(velocity.current.clone().multiplyScalar(delta * 5));
+        
+        // Friction
         velocity.current.multiplyScalar(0.95);
+        
+        // Visual Rolling
         ballRef.current.rotation.x += velocity.current.z * 0.1;
         ballRef.current.rotation.z -= velocity.current.x * 0.1;
+        
+        // Boundary Bouncing
         if (ballPos.x > 40) { ballPos.x = 40; velocity.current.x *= -0.5; }
         if (ballPos.x < -40) { ballPos.x = -40; velocity.current.x *= -0.5; }
         if (ballPos.z > 40) { ballPos.z = 40; velocity.current.z *= -0.5; }
         if (ballPos.z < -40) { ballPos.z = -40; velocity.current.z *= -0.5; }
     });
+    
     return (
         <mesh ref={ballRef} position={[25, 0.5, 20]} castShadow>
             <sphereGeometry args={[0.5, 32, 32]} />
@@ -271,7 +303,13 @@ const PlayerController = ({
   return (
     <group>
         <group ref={groupRef}>
-            <Avatar type={user.characterType} color={user.color} isMoving={isMoving && isGrounded} withShadow={false} />
+            <Avatar 
+                type={user.characterType} 
+                color={user.color} 
+                accessory={user.accessory}
+                isMoving={isMoving && isGrounded} 
+                withShadow={false} 
+            />
             {isMicOn && <VoiceIndicator />}
             <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }}>
                 <div className="flex flex-col items-center w-48">
@@ -303,14 +341,16 @@ const PlayerController = ({
   );
 };
 
-const RemotePeer = ({ 
+interface RemotePeerProps {
+  data: PlayerSyncData;
+  chatHistory: ChatMessage[];
+  stream?: MediaStream;
+}
+
+const RemotePeer: React.FC<RemotePeerProps> = ({ 
     data, 
     chatHistory, 
     stream 
-}: { 
-    data: PlayerSyncData, 
-    chatHistory: ChatMessage[], 
-    stream?: MediaStream 
 }) => {
     const groupRef = useRef<THREE.Group>(null);
     const targetPos = useRef(new THREE.Vector3(...data.position));
@@ -338,7 +378,12 @@ const RemotePeer = ({
 
     return (
         <group ref={groupRef} position={new THREE.Vector3(...data.position)}>
-            <Avatar type={data.user.characterType} color={data.user.color} isMoving={data.isMoving} />
+            <Avatar 
+                type={data.user.characterType} 
+                color={data.user.color} 
+                accessory={data.user.accessory}
+                isMoving={data.isMoving} 
+            />
             {data.isMicOn && <VoiceIndicator />}
             {stream && <StreamAudio stream={stream} />}
             <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }}>
@@ -358,18 +403,20 @@ const RemotePeer = ({
     );
 }
 
-const NPC = ({ 
+interface NPCProps {
+    data: NPCData;
+    chatHistory: ChatMessage[];
+    nearbyNPC: string | null;
+    setNearbyNPC: (name: string | null) => void;
+    playerPosRef: React.MutableRefObject<THREE.Vector3>;
+}
+
+const NPC: React.FC<NPCProps> = ({ 
     data, 
     chatHistory,
     nearbyNPC,
     setNearbyNPC,
     playerPosRef
-}: { 
-    data: NPCData, 
-    chatHistory: ChatMessage[],
-    nearbyNPC: string | null,
-    setNearbyNPC: (name: string | null) => void,
-    playerPosRef: React.MutableRefObject<THREE.Vector3>
 }) => {
     const latestMsg = chatHistory.filter(m => m.sender === data.name).pop();
     const [displayedMsg, setDisplayedMsg] = useState<string | null>(null);
@@ -404,7 +451,12 @@ const NPC = ({
 
     return (
         <group ref={groupRef} position={new THREE.Vector3(...data.position)}>
-             <Avatar type={data.characterType} color={data.color} isMoving={false} />
+             <Avatar 
+                type={data.characterType} 
+                color={data.color} 
+                accessory={data.accessory}
+                isMoving={false} 
+             />
              <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }}>
                  <div className="flex flex-col items-center w-48 gap-1">
                      {isInteracting && !displayedMsg && (
@@ -452,6 +504,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const [colliders, setColliders] = useState<Collider[]>([]);
   const [remotePeers, setRemotePeers] = useState<Record<string, PlayerSyncData>>({});
   const [peerStreams, setPeerStreams] = useState<Record<string, MediaStream>>({});
+  const [ballState, setBallState] = useState<{ velocity: number[], position: number[], timestamp: number } | null>(null);
   const roomRef = useRef<any>(null);
   
   useEffect(() => {
@@ -461,6 +514,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       
       const [sendState, getState] = room.makeAction('state');
       const [sendChat, getChat] = room.makeAction('chat');
+      const [sendBall, getBall] = room.makeAction('ball');
       
       getState((data: PlayerSyncData, peerId: string) => {
           setRemotePeers(prev => ({ ...prev, [peerId]: { ...data, id: peerId } }));
@@ -468,6 +522,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       
       getChat((data: { text: string, sender: string }, peerId: string) => {
           onRemoteChat(data.sender, data.text);
+      });
+
+      getBall((data: { velocity: number[], position: number[], timestamp: number }, peerId: string) => {
+          setBallState(data);
       });
       
       room.onPeerStream((stream: MediaStream, peerId: string) => {
@@ -501,6 +559,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       }, 50);
       
       (window as any).__sendChat = sendChat;
+      (window as any).__sendBall = sendBall;
 
       return () => {
           clearInterval(interval);
@@ -537,6 +596,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       rotationRef.current = rotation;
       isMovingRef.current = moving;
   }
+  
+  const handleBallKick = (velocity: number[], position: number[]) => {
+      if ((window as any).__sendBall) {
+          (window as any).__sendBall({ velocity, position, timestamp: Date.now() });
+      }
+  };
 
   return (
     <div className="w-full h-full absolute inset-0 bg-sky-300">
@@ -552,7 +617,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               onUpdateState={handleLocalUpdate}
               isMicOn={!!micStream}
            />
-            <KickableBall playerPosRef={playerPosRef} />
+            <KickableBall 
+                playerPosRef={playerPosRef} 
+                onKick={handleBallKick}
+                remoteBallState={ballState}
+            />
            {NPC_LIST.map(npc => (
                <NPC 
                  key={npc.id} 

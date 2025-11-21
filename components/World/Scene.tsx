@@ -4,14 +4,6 @@ import { useFrame, ThreeElements } from '@react-three/fiber';
 import { PointLightHelper, Mesh, DoubleSide, Vector3 } from 'three';
 import { Collider } from '../../types';
 
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
-
 const Flag: React.FC<{ position: [number, number, number] }> = ({ position }) => {
     const flagRef = useRef<Mesh>(null);
     // Stable Wikimedia URL for HK Flag
@@ -146,6 +138,29 @@ const Mountain: React.FC<{ position: [number, number, number] }> = ({ position }
   </group>
 );
 
+// Deterministic random for rocks to prevent re-rendering jitter
+const seededRandom = (seed: number) => {
+    const x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
+};
+
+// Generate rock data once
+const RIVER_ROCKS = Array.from({ length: 40 }).map((_, i) => {
+    // Use deterministic values based on index i
+    const r1 = seededRandom(i * 12.34);
+    const r2 = seededRandom(i * 45.67);
+    const r3 = seededRandom(i * 89.01);
+    
+    const x = -60 + i * 3.5 + r1 * 2;
+    return {
+        key: i,
+        pos1: [x, 0, -7 + r2 * 0.5] as [number, number, number],
+        scale1: 0.8 + r2,
+        pos2: [x, 0, 7 - r3 * 0.5] as [number, number, number],
+        scale2: 0.8 + r3
+    };
+});
+
 const River: React.FC = () => (
     <group position={[0, 0.1, -14]}>
         <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -161,16 +176,13 @@ const River: React.FC = () => (
             />
         </mesh>
         
-        {/* River Banks (Random Rocks) */}
-        {Array.from({ length: 40 }).map((_, i) => {
-            const x = -60 + i * 3.5 + Math.random() * 2;
-            return (
-                <group key={i}>
-                     <Rock position={[x, 0, -7 + Math.random() * 0.5]} scale={0.8 + Math.random()} />
-                     <Rock position={[x, 0, 7 - Math.random() * 0.5]} scale={0.8 + Math.random()} />
-                </group>
-            )
-        })}
+        {/* River Banks (Stable Rocks) */}
+        {RIVER_ROCKS.map((rock) => (
+            <group key={rock.key}>
+                    <Rock position={rock.pos1} scale={rock.scale1} />
+                    <Rock position={rock.pos2} scale={rock.scale2} />
+            </group>
+        ))}
     </group>
 )
 

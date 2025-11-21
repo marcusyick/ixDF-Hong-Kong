@@ -1,10 +1,17 @@
-import { CharacterType, NPCData } from './types';
+import { CharacterType, NPCData, Accessory } from './types';
 
 export const CHARACTER_OPTIONS = [
   { type: CharacterType.RABBIT, color: '#fca5a5', label: 'Pink Bun' },
   { type: CharacterType.BEAR, color: '#93c5fd', label: 'Blue Bear' },
   { type: CharacterType.CAT, color: '#fde047', label: 'Yellow Cat' },
-  { type: CharacterType.ROBOT, color: '#cbd5e1', label: 'Chill Bot' },
+  { type: CharacterType.ROBOT, color: '#475569', label: 'Chill Bot' },
+];
+
+export const ACCESSORY_OPTIONS = [
+  { id: Accessory.NONE, label: 'None', icon: '🚫' },
+  { id: Accessory.HAT, label: 'Party Hat', icon: '🎉' },
+  { id: Accessory.GLASSES, label: 'Sunglasses', icon: '😎' },
+  { id: Accessory.BALLOON, label: 'Balloon', icon: '🎈' },
 ];
 
 export const NPC_LIST: NPCData[] = [
@@ -16,6 +23,7 @@ export const NPC_LIST: NPCData[] = [
     position: [5, 0, 5],
     persona: "You are Sarah, the Community Manager for IxDF Hong Kong. You are super welcoming, energetic, and love connecting designers together. You invite people to check out the latest local design events and meetups!",
     useThinking: false,
+    accessory: Accessory.HAT
     // wanderRadius removed to keep stationary
   },
   {
@@ -26,6 +34,7 @@ export const NPC_LIST: NPCData[] = [
     position: [-8, 0, -2],
     persona: "You are Ken, a senior UX Mentor. You are thoughtful, experienced, and love discussing user research, empathy, design ethics, and career growth. You often ask deep questions to help junior designers reflect.",
     useThinking: true, // Triggers Thinking Mode
+    accessory: Accessory.GLASSES
     // wanderRadius removed to keep stationary
   }
 ];
