@@ -297,6 +297,87 @@ const Whiteboard: React.FC<{ position: [number, number, number], rotation?: [num
   </group>
 );
 
+const AgendaBoard: React.FC<{ position: [number, number, number], rotation?: [number, number, number] }> = ({ position, rotation = [0, 0, 0] }) => (
+  <group position={position} rotation={rotation as any}>
+    {/* Stand/Legs */}
+    <mesh position={[-2, 1.2, 0]}>
+       <cylinderGeometry args={[0.04, 0.04, 2.4]} />
+       <meshStandardMaterial color="#64748b" metalness={0.6} />
+    </mesh>
+    <mesh position={[2, 1.2, 0]}>
+       <cylinderGeometry args={[0.04, 0.04, 2.4]} />
+       <meshStandardMaterial color="#64748b" metalness={0.6} />
+    </mesh>
+    <mesh position={[0, 0.5, 0]}>
+        <boxGeometry args={[4.4, 0.05, 0.05]} />
+        <meshStandardMaterial color="#64748b" />
+    </mesh>
+
+    {/* Board Frame */}
+    <mesh position={[0, 2.2, 0]}>
+      <boxGeometry args={[4.6, 3.2, 0.1]} />
+      <meshStandardMaterial color="#94a3b8" />
+    </mesh>
+    
+    {/* Board Surface */}
+    <mesh position={[0, 2.2, 0.06]}>
+      <planeGeometry args={[4.4, 3]} />
+      <meshStandardMaterial color="white" roughness={0.2} />
+    </mesh>
+
+    {/* Content Group */}
+    <group position={[0, 2.2, 0.07]}>
+        <Text 
+            position={[0, 1.2, 0]} 
+            fontSize={0.25} 
+            color="#0f172a" 
+            fontWeight="bold" 
+            anchorX="center" 
+            anchorY="top"
+        >
+            What you can do in here?
+        </Text>
+        <Text 
+            position={[-1.9, 0.85, 0]} 
+            fontSize={0.16} 
+            color="#334155" 
+            anchorX="left" 
+            anchorY="top"
+            maxWidth={3.8}
+            lineHeight={1.4}
+        >
+            • Introduce yourself{'\n'}
+            • Play some football{'\n'}
+            • Meet new designers
+        </Text>
+
+        <Text 
+            position={[0, -0.2, 0]} 
+            fontSize={0.25} 
+            color="#0f172a" 
+            fontWeight="bold" 
+            anchorX="center" 
+            anchorY="top"
+        >
+            Topic suggestions:
+        </Text>
+        <Text 
+            position={[-1.9, -0.55, 0]} 
+            fontSize={0.14} 
+            color="#334155" 
+            anchorX="left" 
+            anchorY="top"
+            maxWidth={4.0}
+            lineHeight={1.5}
+        >
+            • Why are you here?{'\n'}
+            • How do you think the community can help each other?{'\n'}
+            • Do you use AI in design? What tools have you been using?
+        </Text>
+    </group>
+  </group>
+);
+
 const PlaygroundStructure: React.FC<{ position: [number, number, number] }> = ({ position }) => (
   <group position={position}>
     {/* Simple Slide or Structure */}
@@ -450,9 +531,12 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
       
       {/* Whiteboard Signage */}
       <Whiteboard position={[0, 0, -4]} />
+      
+      {/* New Agenda Board */}
+      <AgendaBoard position={[6.5, 0, -3]} rotation={[0, -0.5, 0]} />
 
       {/* Hong Kong Flag */}
-      <Flag position={[4, 0, -2]} />
+      <Flag position={[-4, 0, -2]} />
       
       {/* Campfire Area */}
       <group position={[0, 0, 2]}>
