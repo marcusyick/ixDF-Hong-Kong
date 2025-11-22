@@ -20,7 +20,8 @@ const CharacterSelection: React.FC<Props> = ({ onComplete }) => {
         name: name.trim(),
         characterType: selectedChar.type,
         color: selectedChar.color,
-        accessory: selectedAccessory
+        accessory: selectedAccessory,
+        unlockedAccessories: [Accessory.NONE, selectedAccessory]
       });
     }
   };

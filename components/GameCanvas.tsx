@@ -7,7 +7,7 @@ import { MessageCircle } from 'lucide-react';
 import { joinRoom } from 'trystero';
 import Scene from './World/Scene';
 import Avatar from './Avatar';
-import { UserState, NPCData, ChatMessage, Collider, PlayerSyncData } from '../types';
+import { UserState, NPCData, ChatMessage, Collider, PlayerSyncData, CoinData } from '../types';
 import { NPC_LIST } from '../constants';
 
 function usePlayerControls() {
@@ -80,17 +80,43 @@ const VoiceIndicator = () => (
   </Html>
 );
 
-const StreamAudio = ({ stream }: { stream: MediaStream }) => {
-    const sound = useRef<THREE.PositionalAudio>(null);
+// Component to attach AudioListener to the camera
+const AudioListenerController = ({ setListener }: { setListener: (l: THREE.AudioListener) => void }) => {
+    const { camera } = useThree();
     useEffect(() => {
-        if (sound.current && stream) {
-            sound.current.setMediaStreamSource(stream as any);
+        const listener = new THREE.AudioListener();
+        camera.add(listener);
+        setListener(listener);
+        return () => {
+            camera.remove(listener);
+            // We can't really setListener(null) here safely if unmounting happens out of order, 
+            // but state cleanup usually handles it.
+        };
+    }, [camera, setListener]);
+    return null;
+};
+
+const StreamAudio = ({ stream, listener }: { stream: MediaStream, listener: THREE.AudioListener }) => {
+    const sound = useRef<THREE.PositionalAudio>(null);
+    
+    useEffect(() => {
+        if (sound.current && stream && listener) {
+            if (listener.context.state === 'suspended') {
+                listener.context.resume();
+            }
+            // Use standard setMediaStreamSource
+            // @ts-ignore
+            sound.current.setMediaStreamSource(stream);
             sound.current.setRefDistance(2);
             sound.current.setRolloffFactor(1.5);
-            // sound.current.play() is usually redundant for media streams but safe to call
+            sound.current.setVolume(1);
         }
-    }, [stream]);
-    return <positionalAudio ref={sound} />
+    }, [stream, listener]);
+
+    if (!listener) return null;
+
+    // Pass listener as args to constructor
+    return <positionalAudio ref={sound} args={[listener]} />
 };
 
 interface KickableBallProps {
@@ -171,6 +197,103 @@ const KickableBall = ({ playerPosRef, onKick, remoteBallState }: KickableBallPro
     )
 }
 
+const Coin = ({ position }: { position: [number, number, number] }) => {
+    const meshRef = useRef<THREE.Group>(null);
+    
+    useFrame((state) => {
+        if (meshRef.current) {
+            meshRef.current.rotation.y += 0.03;
+            meshRef.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 3) * 0.1;
+        }
+    });
+
+    return (
+        <group ref={meshRef} position={position}>
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+                <cylinderGeometry args={[0.3, 0.3, 0.08, 24]} />
+                <meshStandardMaterial color="#fbbf24" metalness={0.8} roughness={0.2} />
+            </mesh>
+            <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.05]}>
+                <cylinderGeometry args={[0.2, 0.2, 0.02, 24]} />
+                <meshStandardMaterial color="#f59e0b" metalness={0.6} roughness={0.3} />
+            </mesh>
+             <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.05]}>
+                <cylinderGeometry args={[0.2, 0.2, 0.02, 24]} />
+                <meshStandardMaterial color="#f59e0b" metalness={0.6} roughness={0.3} />
+            </mesh>
+        </group>
+    )
+}
+
+const CoinManager = ({ playerPosRef, onCollect }: { playerPosRef: React.MutableRefObject<THREE.Vector3>, onCollect: () => void }) => {
+    const [coins, setCoins] = useState<CoinData[]>([]);
+    
+    // Spawn coins logic
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setCoins(currentCoins => {
+                if (currentCoins.length >= 40) return currentCoins; // Cap at 40
+                
+                const x = (Math.random() - 0.5) * 80; // -40 to 40
+                const z = (Math.random() - 0.5) * 80; // -40 to 40
+                
+                // Avoid spawning too close to center (spawn area)
+                if (Math.abs(x) < 5 && Math.abs(z) < 5) return currentCoins;
+
+                const newCoin: CoinData = {
+                    id: Date.now().toString() + Math.random(),
+                    position: [x, 1, z]
+                };
+                return [...currentCoins, newCoin];
+            });
+        }, 3000); // Add coin every 3 seconds
+
+        return () => clearInterval(interval);
+    }, []);
+
+    // Collision Detection
+    useFrame(() => {
+        if (!playerPosRef.current) return;
+
+        const playerPos = playerPosRef.current;
+        const COLLECT_RADIUS = 1.5;
+
+        setCoins(currentCoins => {
+            let collected = false;
+            const remainingCoins = currentCoins.filter(coin => {
+                const dx = playerPos.x - coin.position[0];
+                const dy = playerPos.y - coin.position[1];
+                const dz = playerPos.z - coin.position[2];
+                const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                
+                if (dist < COLLECT_RADIUS) {
+                    collected = true;
+                    return false; // Remove from list
+                }
+                return true;
+            });
+
+            if (collected) {
+                onCollect();
+            }
+            
+            // Only trigger state update if count changed to avoid re-renders
+            if (remainingCoins.length !== currentCoins.length) {
+                return remainingCoins;
+            }
+            return currentCoins;
+        });
+    });
+
+    return (
+        <group>
+            {coins.map(coin => (
+                <Coin key={coin.id} position={coin.position} />
+            ))}
+        </group>
+    );
+};
+
 const PlayerController = ({ 
     user, 
     messages,
@@ -189,7 +312,7 @@ const PlayerController = ({
   const groupRef = useRef<THREE.Group>(null);
   const shadowRef = useRef<THREE.Mesh>(null);
   const controlsRef = useRef<any>(null);
-  const { camera } = useThree();
+  const { camera, scene } = useThree();
   const { forward, backward, left, right, shift, jump } = usePlayerControls();
   const [isMoving, setIsMoving] = useState(false);
   const prevPos = useRef(new THREE.Vector3(0, 0, 0));
@@ -225,6 +348,7 @@ const PlayerController = ({
     const speed = shift ? 7 : 4;
     const moveDir = new THREE.Vector3(0, 0, 0);
     
+    // --- Movement Logic ---
     if (forward || backward || left || right) {
         const camDir = new THREE.Vector3();
         camera.getWorldDirection(camDir);
@@ -265,27 +389,55 @@ const PlayerController = ({
         setIsMoving(false);
     }
 
+    // --- Ground Detection (Raycast) ---
+    const raycaster = new THREE.Raycaster();
+    const rayOrigin = groupRef.current.position.clone().add(new THREE.Vector3(0, 20, 0));
+    raycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
+    
+    // Intersect with everything in scene
+    const intersects = raycaster.intersectObjects(scene.children, true);
+    
+    let groundHeight = 0;
+    // Find the highest "walkable" point
+    for (let hit of intersects) {
+        // Ensure we don't hit the player itself (sometimes happens if shadow/accessories get hit)
+        // We rely on userData.walkable to identify terrain
+        if (hit.object.userData.walkable) {
+            groundHeight = hit.point.y;
+            break; 
+        }
+    }
+
+    // --- Gravity & Jump ---
     const GRAVITY = 20;
     const JUMP_FORCE = 8;
+    
     velocityY.current -= GRAVITY * delta;
     groupRef.current.position.y += velocityY.current * delta;
 
-    if (groupRef.current.position.y <= 0) {
-        groupRef.current.position.y = 0;
+    // Ground collision
+    if (groupRef.current.position.y <= groundHeight) {
+        groupRef.current.position.y = groundHeight;
         velocityY.current = 0;
         if (jump) velocityY.current = JUMP_FORCE;
     }
 
+    // Update Refs
     playerPosRef.current.copy(groupRef.current.position);
     if (onUpdateState) onUpdateState(groupRef.current.rotation.y, isMoving);
 
+    // --- Shadow & Camera ---
     if (shadowRef.current) {
         shadowRef.current.position.x = groupRef.current.position.x;
         shadowRef.current.position.z = groupRef.current.position.z;
-        const height = groupRef.current.position.y;
-        const scale = Math.max(0.5, 1 - height * 0.2); 
+        // Shadow sticks to groundHeight or slightly above, but for simplicity, stick to player Y or ground
+        // Actually shadow should project to ground.
+        shadowRef.current.position.y = groundHeight + 0.02;
+        
+        const heightDiff = groupRef.current.position.y - groundHeight;
+        const scale = Math.max(0.5, 1 - heightDiff * 0.2); 
         shadowRef.current.scale.setScalar(scale);
-        const opacity = Math.max(0.05, 0.15 - height * 0.05);
+        const opacity = Math.max(0.05, 0.15 - heightDiff * 0.05);
         (shadowRef.current.material as THREE.MeshBasicMaterial).opacity = opacity;
     }
 
@@ -298,7 +450,7 @@ const PlayerController = ({
     prevPos.current.copy(currentPos);
   });
 
-  const isGrounded = groupRef.current ? groupRef.current.position.y <= 0.05 : true;
+  const isGrounded = groupRef.current ? (groupRef.current.position.y - 0.05) <= (playerPosRef.current.y) : true; // Approx check
 
   return (
     <group>
@@ -345,12 +497,14 @@ interface RemotePeerProps {
   data: PlayerSyncData;
   chatHistory: ChatMessage[];
   stream?: MediaStream;
+  audioListener: THREE.AudioListener | null;
 }
 
 const RemotePeer: React.FC<RemotePeerProps> = ({ 
     data, 
     chatHistory, 
-    stream 
+    stream, 
+    audioListener 
 }) => {
     const groupRef = useRef<THREE.Group>(null);
     const targetPos = useRef(new THREE.Vector3(...data.position));
@@ -385,7 +539,7 @@ const RemotePeer: React.FC<RemotePeerProps> = ({
                 isMoving={data.isMoving} 
             />
             {data.isMicOn && <VoiceIndicator />}
-            {stream && <StreamAudio stream={stream} />}
+            {stream && audioListener && <StreamAudio stream={stream} listener={audioListener} />}
             <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }}>
                 <div className="flex flex-col items-center w-48">
                     {displayedMsg && (
@@ -488,6 +642,7 @@ interface GameCanvasProps {
     onRemoteChat: (sender: string, text: string) => void;
     micStream: MediaStream | null;
     onPlayerListUpdate?: (players: string[]) => void;
+    onCoinCollected?: () => void;
 }
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
@@ -498,7 +653,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     broadcastMessage,
     onRemoteChat,
     micStream,
-    onPlayerListUpdate
+    onPlayerListUpdate,
+    onCoinCollected
 }) => {
   const playerPosRef = useRef(new THREE.Vector3(0, 0, 0));
   const isMovingRef = useRef(false); 
@@ -508,6 +664,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const [peerStreams, setPeerStreams] = useState<Record<string, MediaStream>>({});
   const [ballState, setBallState] = useState<{ velocity: number[], position: number[], timestamp: number } | null>(null);
   const roomRef = useRef<any>(null);
+  
+  // Audio Listener for the Camera
+  const [audioListener, setAudioListener] = useState<THREE.AudioListener | null>(null);
   
   useEffect(() => {
       const config = { appId: 'ixdf-garden-v1' };
@@ -616,9 +775,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   return (
     <div className="w-full h-full absolute inset-0 bg-sky-300">
       <Canvas shadows camera={{ position: [0, 5, 10], fov: 50 }}>
+         <AudioListenerController setListener={setAudioListener} />
          <fog attach="fog" args={['#e0f2fe', 10, 50]} />
          <Suspense fallback={<Loader />}>
-           <Scene setColliders={setColliders} />
+           <Scene setColliders={setColliders} playerPosRef={playerPosRef} />
            <PlayerController 
               user={user} 
               messages={chatHistory}
@@ -626,6 +786,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               colliders={colliders}
               onUpdateState={handleLocalUpdate}
               isMicOn={!!micStream}
+           />
+           <CoinManager 
+              playerPosRef={playerPosRef} 
+              onCollect={() => onCoinCollected && onCoinCollected()} 
            />
             <KickableBall 
                 playerPosRef={playerPosRef} 
@@ -648,6 +812,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     data={peer} 
                     chatHistory={chatHistory} 
                     stream={peerStreams[peer.id]}
+                    audioListener={audioListener}
                 />
            ))}
          </Suspense>

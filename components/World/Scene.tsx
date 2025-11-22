@@ -1,8 +1,196 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
-import { Text, Float, useHelper, MeshDistortMaterial, Sparkles, useTexture } from '@react-three/drei';
+import { Text, Float, useHelper, MeshDistortMaterial, Sparkles, useTexture, Html } from '@react-three/drei';
 import { useFrame, ThreeElements } from '@react-three/fiber';
 import { PointLightHelper, Mesh, DoubleSide, Vector3 } from 'three';
+import * as THREE from 'three';
 import { Collider } from '../../types';
+
+const Firework: React.FC<{ color: string, onComplete: () => void }> = ({ color, onComplete }) => {
+    const rocketRef = useRef<THREE.Mesh>(null);
+    const [exploding, setExploding] = useState(false);
+    const particlesRef = useRef<THREE.Points>(null);
+    
+    // Initial rocket velocity - Reduced to 6-7 range for lower altitude
+    const velocity = useRef(new THREE.Vector3(0, 6 + Math.random(), 0));
+    const explodedTime = useRef(0);
+    const explosionPos = useRef(new THREE.Vector3(0, 0, 0));
+
+    // Particle data
+    const particleCount = 500;
+    const [positions] = useState(() => new Float32Array(particleCount * 3));
+    const [velocities] = useState(() => {
+        const arr = [];
+        for(let i=0; i<particleCount; i++) {
+            // Uniform spherical distribution for "globe" shape
+            const u = Math.random();
+            const v = Math.random();
+            const theta = 2 * Math.PI * u;
+            const phi = Math.acos(2 * v - 1);
+            
+            // Significantly increased explosion speed for bigger range (8-12 range)
+            const speed = 8 + Math.random() * 4; 
+            
+            arr.push({
+                x: speed * Math.sin(phi) * Math.cos(theta),
+                y: speed * Math.sin(phi) * Math.sin(theta),
+                z: speed * Math.cos(phi)
+            });
+        }
+        return arr;
+    });
+
+    useFrame((state, delta) => {
+        if (!exploding) {
+            if (rocketRef.current) {
+                rocketRef.current.position.add(velocity.current.clone().multiplyScalar(delta));
+                // Reduced gravity to 3 for floatier ascent
+                velocity.current.y -= 3 * delta; 
+                
+                if (velocity.current.y <= 0) {
+                    // Capture position before removing rocket mesh
+                    explosionPos.current.copy(rocketRef.current.position);
+                    setExploding(true);
+                    explodedTime.current = state.clock.elapsedTime;
+                }
+            }
+        } else {
+             if (particlesRef.current) {
+                 const elapsed = state.clock.elapsedTime - explodedTime.current;
+                 if (elapsed > 2.5) {
+                     onComplete();
+                     return;
+                 }
+
+                 const positionsAttr = particlesRef.current.geometry.attributes.position;
+                 
+                 for(let i=0; i<particleCount; i++) {
+                     const vx = velocities[i].x;
+                     const vy = velocities[i].y;
+                     const vz = velocities[i].z;
+                     
+                     // Reduced air drag (from 1.5 to 0.8) to allow larger expansion
+                     const drag = Math.exp(-0.8 * elapsed); 
+                     
+                     const cx = vx * elapsed * drag;
+                     // Gravity on particles (lighter than rocket)
+                     const cy = (vy * elapsed * drag) - (2 * elapsed * elapsed); 
+                     const cz = vz * elapsed * drag;
+
+                     positionsAttr.setXYZ(i, cx, cy, cz);
+                 }
+                 positionsAttr.needsUpdate = true;
+                 
+                 const mat = particlesRef.current.material as THREE.PointsMaterial;
+                 // Fade out
+                 mat.opacity = Math.max(0, 1 - (elapsed / 2.5));
+                 // Shrink slightly over time
+                 mat.size = Math.max(0.01, 0.25 * (1 - elapsed * 0.3));
+             }
+        }
+    });
+    
+    if (exploding) {
+        return (
+             <points ref={particlesRef} position={explosionPos.current}>
+                 <bufferGeometry>
+                     <bufferAttribute 
+                        attach="attributes-position" 
+                        count={particleCount} 
+                        array={positions} 
+                        itemSize={3} 
+                    />
+                 </bufferGeometry>
+                 <pointsMaterial 
+                    size={0.2} 
+                    color={color} 
+                    transparent 
+                    depthWrite={false} 
+                    blending={THREE.AdditiveBlending} 
+                />
+             </points>
+        )
+    }
+
+    return (
+        <mesh ref={rocketRef} position={[0, 0, 0]}>
+            <sphereGeometry args={[0.1]} />
+            <meshBasicMaterial color={color} />
+            <mesh position={[0, -0.2, 0]}>
+                 <cylinderGeometry args={[0.05, 0.05, 0.4]} />
+                 <meshBasicMaterial color="white" />
+            </mesh>
+            <pointLight color={color} intensity={2} distance={5} />
+        </mesh>
+    );
+}
+
+const FireworkLauncher: React.FC<{ position: [number, number, number], playerPos?: React.MutableRefObject<THREE.Vector3> }> = ({ position, playerPos }) => {
+    const [fireworks, setFireworks] = useState<{id: number, color: string}[]>([]);
+    const [showPrompt, setShowPrompt] = useState(false);
+    
+    useFrame(() => {
+        if (playerPos?.current) {
+             const dist = new THREE.Vector3(...position).distanceTo(playerPos.current);
+             setShowPrompt(dist < 3.5);
+        }
+    });
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.key === 'e' || e.key === 'E') && showPrompt) {
+                const colors = ['#ef4444', '#3b82f6', '#eab308', '#a855f7', '#ec4899', '#22c55e'];
+                const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                setFireworks(prev => [...prev, { id: Date.now() + Math.random(), color: randomColor }]);
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [showPrompt]);
+
+    const removeFirework = (id: number) => {
+        setFireworks(prev => prev.filter(fw => fw.id !== id));
+    }
+
+    return (
+        <group position={position}>
+            {/* Launcher Base */}
+            <mesh position={[0, 0.1, 0]}>
+                <boxGeometry args={[0.6, 0.2, 0.6]} />
+                <meshStandardMaterial color="#334155" />
+            </mesh>
+            {/* Launcher Tube */}
+            <mesh position={[0, 0.5, 0]}>
+                <cylinderGeometry args={[0.2, 0.2, 0.8]} />
+                <meshStandardMaterial color="#94a3b8" />
+            </mesh>
+            <mesh position={[0, 0.5, 0]}>
+                 <cylinderGeometry args={[0.15, 0.15, 0.81]} />
+                 <meshStandardMaterial color="#0f172a" />
+            </mesh>
+            <mesh position={[0, 0.5, 0]}>
+                <cylinderGeometry args={[0.21, 0.21, 0.2]} />
+                <meshStandardMaterial color="#ef4444" />
+            </mesh>
+            
+            {/* Interaction Prompt */}
+            {showPrompt && (
+                <Html position={[0, 1.8, 0]} center>
+                    <div className="flex flex-col items-center animate-bounce">
+                        <div className="bg-black/70 backdrop-blur-md text-white px-4 py-1.5 rounded-full text-sm font-bold border border-white/20 shadow-lg whitespace-nowrap flex items-center gap-2">
+                            <span className="bg-white text-black w-5 h-5 rounded flex items-center justify-center text-xs font-extrabold">E</span>
+                            Launch Fireworks
+                        </div>
+                        <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-black/70 mt-1"></div>
+                    </div>
+                </Html>
+            )}
+
+            {fireworks.map(fw => (
+                <Firework key={fw.id} color={fw.color} onComplete={() => removeFirework(fw.id)} />
+            ))}
+        </group>
+    )
+}
 
 const Flag: React.FC<{ position: [number, number, number] }> = ({ position }) => {
     const flagRef = useRef<Mesh>(null);
@@ -73,24 +261,24 @@ const GoalPost: React.FC<{ position: [number, number, number], rotation?: [numbe
 const FootballField: React.FC<{ position: [number, number, number] }> = ({ position }) => (
     <group position={position}>
         {/* Turf */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow userData={{ walkable: true }}>
             <planeGeometry args={[20, 30]} />
             <meshStandardMaterial color="#4ade80" />
         </mesh>
         
         {/* Lines (White) */}
         {/* Borders */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} userData={{ walkable: true }}>
             <planeGeometry args={[18, 28]} />
              <meshBasicMaterial color="white" wireframe />
         </mesh>
         {/* Center Line */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} userData={{ walkable: true }}>
              <planeGeometry args={[18, 0.1]} />
              <meshBasicMaterial color="white" />
         </mesh>
          {/* Center Circle */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} userData={{ walkable: true }}>
             <ringGeometry args={[2, 2.1, 32]} />
             <meshBasicMaterial color="white" />
         </mesh>
@@ -118,22 +306,77 @@ const Tree: React.FC<{ position: [number, number, number], color?: string, scale
   </group>
 );
 
-const Rock: React.FC<{ position: [number, number, number], scale?: number }> = ({ position, scale = 1 }) => (
-  <mesh position={position} scale={scale} rotation={[Math.random(), Math.random(), Math.random()]}>
-    <dodecahedronGeometry args={[0.5, 0]} />
-    <meshStandardMaterial color="#94a3b8" flatShading />
-  </mesh>
-);
+const Rock: React.FC<{ position: [number, number, number], scale?: number }> = ({ position, scale = 1 }) => {
+  // Use useMemo to keep rotation stable across re-renders
+  const rotation = useMemo(() => [Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI] as [number, number, number], []);
+  
+  return (
+      <mesh position={position} scale={scale} rotation={rotation}>
+        <dodecahedronGeometry args={[0.5, 0]} />
+        <meshStandardMaterial color="#94a3b8" flatShading />
+      </mesh>
+  );
+}
 
 const Mountain: React.FC<{ position: [number, number, number] }> = ({ position }) => (
   <group position={position}>
-    <mesh position={[0, 5, 0]}>
+    <mesh position={[0, 5, 0]} userData={{ walkable: true }}>
         <coneGeometry args={[8, 12, 4]} />
         <meshStandardMaterial color="#64748b" flatShading />
     </mesh>
-    <mesh position={[0, 9, 0]}>
+    <mesh position={[0, 9, 0]} userData={{ walkable: true }}>
         <coneGeometry args={[3, 4, 4]} />
         <meshStandardMaterial color="white" flatShading />
+    </mesh>
+  </group>
+);
+
+const WoodenHouse: React.FC<{ position: [number, number, number], rotation?: [number, number, number] }> = ({ position, rotation = [0, 0, 0] }) => (
+  <group position={position} rotation={rotation as any}>
+    {/* Base / Deck */}
+    <mesh position={[0, 0.2, 0]}>
+        <boxGeometry args={[5, 0.4, 5]} />
+        <meshStandardMaterial color="#78350f" />
+    </mesh>
+    {/* Steps */}
+    <mesh position={[0, 0.1, 2.7]} userData={{ walkable: true }}>
+        <boxGeometry args={[2, 0.2, 0.4]} />
+        <meshStandardMaterial color="#78350f" />
+    </mesh>
+
+    {/* Walls */}
+    <mesh position={[0, 1.7, 0]}>
+        <boxGeometry args={[4.5, 3, 4.5]} />
+        <meshStandardMaterial color="#b45309" />
+    </mesh>
+    
+    {/* Roof */}
+    <mesh position={[0, 4, 0]} rotation={[0, Math.PI / 4, 0]}>
+        <coneGeometry args={[4.5, 2.5, 4]} />
+        <meshStandardMaterial color="#581c87" />
+    </mesh>
+    
+    {/* Door Frame */}
+    <mesh position={[0, 1.2, 2.26]}>
+        <boxGeometry args={[1.4, 2.2, 0.1]} />
+        <meshStandardMaterial color="#451a03" />
+    </mesh>
+    {/* Door */}
+    <mesh position={[0, 1.2, 2.3]}>
+        <boxGeometry args={[1.2, 2, 0.1]} />
+        <meshStandardMaterial color="#713f12" />
+    </mesh>
+    
+    {/* Window Round */}
+    <mesh position={[1.5, 2, 2.3]} rotation={[Math.PI/2, 0, 0]}>
+         <cylinderGeometry args={[0.5, 0.5, 0.1, 16]} />
+         <meshStandardMaterial color="#bae6fd" emissive="#7dd3fc" emissiveIntensity={0.2} />
+    </mesh>
+    
+    {/* Side Window */}
+    <mesh position={[-2.26, 2, 0]} rotation={[0, Math.PI/2, 0]}>
+         <boxGeometry args={[1.5, 1, 0.1]} />
+         <meshStandardMaterial color="#bae6fd" />
     </mesh>
   </group>
 );
@@ -163,7 +406,7 @@ const RIVER_ROCKS = Array.from({ length: 40 }).map((_, i) => {
 
 const River: React.FC = () => (
     <group position={[0, 0.1, -14]}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow userData={{ walkable: true }}>
             {/* High segment count for smooth waves */}
             <planeGeometry args={[120, 15, 64, 64]} />
             <MeshDistortMaterial
@@ -328,14 +571,14 @@ const AgendaBoard: React.FC<{ position: [number, number, number], rotation?: [nu
     {/* Content Group */}
     <group position={[0, 2.2, 0.07]}>
         <Text 
-            position={[0, 1.2, 0]} 
+            position={[-0.9, 1.2, 0]} 
             fontSize={0.25} 
             color="#0f172a" 
             fontWeight="bold" 
             anchorX="center" 
             anchorY="top"
         >
-            What you can do in here?
+            Agenda Today!
         </Text>
         <Text 
             position={[-1.9, 0.85, 0]} 
@@ -348,11 +591,12 @@ const AgendaBoard: React.FC<{ position: [number, number, number], rotation?: [nu
         >
             • Introduce yourself{'\n'}
             • Play some football{'\n'}
+            • Collect coin{'\n'}
             • Meet new designers
         </Text>
 
         <Text 
-            position={[0, -0.2, 0]} 
+            position={[-0.7, -0.2, 0]} 
             fontSize={0.25} 
             color="#0f172a" 
             fontWeight="bold" 
@@ -440,20 +684,41 @@ const TableSet: React.FC<{ position: [number, number, number] }> = ({ position }
 
 // --- Data Generation for Physics ---
 // Use stable data so we can map collisions
-const BORDER_TREES = Array.from({ length: 40 }).map((_, i) => {
-    const angle = (i / 40) * Math.PI * 2;
-    const radius = 22 + Math.random() * 5;
+const TREE_COUNT = 80; // Decreased density as requested
+const BORDER_TREES = Array.from({ length: TREE_COUNT }).map((_, i) => {
+    // Use deterministic random numbers based on index 'i'
+    const r1 = seededRandom(i * 100 + 33); // For angle
+    const r2 = seededRandom(i * 200 + 44); // For radius
+    const r3 = seededRandom(i * 300 + 55); // For scale
+
+    // Distribute trees more randomly over a larger area
+    const angle = r1 * Math.PI * 2;
+    // Radius range from inner circle to outer bounds
+    const radius = 15 + r2 * 45; 
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
-    return { position: [x, 0, z] as [number, number, number], scale: 1 + Math.random() * 0.5 };
+    return { position: [x, 0, z] as [number, number, number], scale: 0.8 + r3 * 0.8 };
 }).filter(t => {
     const x = t.position[0];
     const z = t.position[2];
-    // Exclude trees inside the Football Field area (New Position Center: [25, 0, 20], Size: [20, 30])
-    // Bounds: X [15, 35], Z [5, 35]
-    const buffer = 2;
-    const inField = x > (15 - buffer) && x < (35 + buffer) && z > (5 - buffer) && z < (35 + buffer);
-    return !inField;
+    
+    // 1. Exclude Center Plaza (radius ~10)
+    if (Math.abs(x) < 10 && Math.abs(z) < 10) return false;
+
+    // 2. Exclude Football Field area (Field is at [25, 0, 20] with size roughly 20x30)
+    // Expanded exclusion zone to ensure no trees are nearby
+    if (x > 8 && x < 45 && z > -5 && z < 50) return false;
+
+    // 3. Exclude River Area (River is at Z ~ -14, width ~15)
+    // Keep area clear between Z -22 and -6
+    if (z > -22 && z < -6) return false;
+
+    // 4. Exclude Wooden House Area (around [45, 0, 20])
+    const dx = x - 45;
+    const dz = z - 20;
+    if (dx*dx + dz*dz < 225) return false; // radius 15 clearance
+
+    return true;
 });
 
 const INNER_TREES = [
@@ -471,19 +736,12 @@ const ROCKS = [
     { position: [-12, 0.2, 1.5] as [number, number, number], scale: 0.8 },
 ];
 
-const STATIC_STRUCTURES = [
-    { position: [0, 0, -4] as [number, number, number], radius: 2.2 }, // Whiteboard
-    { position: [3, 0, 2] as [number, number, number], radius: 1.0 }, // Campfire
-    { position: [10, 0, 0] as [number, number, number], radius: 2.5 }, // Playground
-    { position: [-6, 0, 4] as [number, number, number], radius: 1.5 }, // Table Set 1
-    { position: [2, 0, -7] as [number, number, number], radius: 1.5 }, // Table Set 2
-];
-
 interface SceneProps {
     setColliders?: (colliders: Collider[]) => void;
+    playerPosRef?: React.MutableRefObject<THREE.Vector3>;
 }
 
-const Scene: React.FC<SceneProps> = ({ setColliders }) => {
+const Scene: React.FC<SceneProps> = ({ setColliders, playerPosRef }) => {
   
   useEffect(() => {
     if (!setColliders) return;
@@ -494,7 +752,8 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
     BORDER_TREES.forEach(t => colliders.push({ position: t.position, radius: 0.6 }));
     INNER_TREES.forEach(t => colliders.push({ position: t.position, radius: 0.6 }));
     
-    // Only trees are kept as colliders per request.
+    // Add Wooden House Collider
+    colliders.push({ position: [45, 0, 20], radius: 3.5 });
 
     setColliders(colliders);
   }, [setColliders]);
@@ -510,8 +769,8 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
       <pointLight position={[-10, 5, -10]} intensity={0.8} color="#a78bfa" />
 
       {/* Ground - Soft Pastel Green */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
-        <planeGeometry args={[100, 100]} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow userData={{ walkable: true }}>
+        <planeGeometry args={[120, 120]} />
         <meshStandardMaterial color="#dcfce7" />
       </mesh>
 
@@ -524,7 +783,7 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
       <Mountain position={[25, 0, -28]} />
 
       {/* --- SECTION 1: The Plaza (Central) --- */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} userData={{ walkable: true }}>
         <circleGeometry args={[5, 32]} />
         <meshStandardMaterial color="#e2e8f0" />
       </mesh>
@@ -532,11 +791,11 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
       {/* Whiteboard Signage */}
       <Whiteboard position={[0, 0, -4]} />
       
-      {/* New Agenda Board */}
-      <AgendaBoard position={[6.5, 0, -3]} rotation={[0, -0.5, 0]} />
+      {/* New Agenda Board - Moved to Left */}
+      <AgendaBoard position={[-4.5, 0, -3]} rotation={[0, 0.5, 0]} />
 
-      {/* Hong Kong Flag */}
-      <Flag position={[-4, 0, -2]} />
+      {/* Hong Kong Flag - Moved to Right */}
+      <Flag position={[3, 0, -4]} />
       
       {/* Campfire Area */}
       <group position={[0, 0, 2]}>
@@ -552,6 +811,9 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
          </mesh>
       </group>
       
+      {/* Fireworks Launcher - Moved Next to Flag */}
+      <FireworkLauncher position={[4.5, 0, -4]} playerPos={playerPosRef} />
+
       {/* Tables */}
       <TableSet position={[-6, 0, 2]} />
       <TableSet position={[-9, 0, 1]} />
@@ -559,7 +821,7 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
       {/* --- SECTION 2: The Zen Garden (Left) --- */}
       <group position={[-10, 0, 0]}>
          {/* Sand patch */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} userData={{ walkable: true }}>
             <circleGeometry args={[5, 32]} />
             <meshStandardMaterial color="#fde68a" />
         </mesh>
@@ -574,7 +836,7 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
       {/* --- SECTION 3: The Playground (Right) --- */}
       <group position={[10, 0, 0]}>
          {/* Blue turf */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} userData={{ walkable: true }}>
             <circleGeometry args={[5, 32]} />
             <meshStandardMaterial color="#a5f3fc" />
         </mesh>
@@ -585,6 +847,9 @@ const Scene: React.FC<SceneProps> = ({ setColliders }) => {
 
       {/* Football Field - Moved away from River (river is at z approx -14) */}
       <FootballField position={[25, 0, 20]} />
+      
+      {/* Wooden House - Side of Football Field */}
+      <WoodenHouse position={[45, 0, 20]} rotation={[0, -Math.PI / 2, 0]} />
 
       {/* Border Trees */}
       {BORDER_TREES.map((t, i) => (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Send, Smile, Users } from 'lucide-react';
-import { UserState, ChatMessage } from '../types';
+import { Mic, MicOff, Send, Smile, Users, Coins, ShoppingBag, Check, Lock } from 'lucide-react';
+import { UserState, ChatMessage, Accessory } from '../types';
+import { SHOP_ITEMS } from '../constants';
 
 interface UIOverlayProps {
   user: UserState;
@@ -11,6 +12,8 @@ interface UIOverlayProps {
   nearbyNPC: string | null;
   onSwitchCharacter: () => void;
   onlineUsers: string[];
+  score: number;
+  onPurchaseAccessory: (item: { id: Accessory, cost: number }) => void;
 }
 
 const EMOJI_LIST = ['😀', '😂', '😍', '😎', '🤔', '😭', '😡', '👍', '👎', '👋', '🙏', '❤️', '🎉', '🔥', '🌿', '🇭🇰'];
@@ -22,10 +25,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   isListening,
   nearbyNPC,
   onSwitchCharacter,
-  onlineUsers
+  onlineUsers,
+  score,
+  onPurchaseAccessory
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showShop, setShowShop] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,6 +79,79 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 ))}
             </div>
           </div>
+        </div>
+
+        {/* Center: Score / Shop Button */}
+        <div className="absolute left-1/2 transform -translate-x-1/2 top-4 z-50">
+            <button 
+                onClick={() => setShowShop(!showShop)}
+                className="bg-white/90 backdrop-blur-sm px-6 py-2 rounded-full shadow-xl border-2 border-yellow-400 flex items-center gap-2 hover:scale-105 transition-transform active:scale-95"
+                title="Open Shop"
+            >
+                <Coins size={20} className="text-yellow-500 fill-yellow-500" />
+                <span className="font-extrabold text-xl text-yellow-600">{score}</span>
+                <div className="bg-yellow-100 rounded-full p-1 ml-1">
+                    <ShoppingBag size={16} className="text-yellow-700" />
+                </div>
+            </button>
+
+            {/* Shop Pop-up Modal */}
+            {showShop && (
+                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                    <div className="bg-garden-100 p-4 flex justify-between items-center border-b border-garden-200">
+                        <h2 className="font-bold text-garden-800 flex items-center gap-2">
+                            <ShoppingBag size={18} />
+                            Garden Shop
+                        </h2>
+                        <button onClick={() => setShowShop(false)} className="text-gray-500 hover:text-gray-800">✕</button>
+                    </div>
+                    <div className="p-4 grid grid-cols-2 gap-3 bg-white/95 max-h-[60vh] overflow-y-auto">
+                        {SHOP_ITEMS.map(item => {
+                            const isOwned = user.unlockedAccessories.includes(item.id);
+                            const isEquipped = user.accessory === item.id;
+                            const canAfford = score >= item.cost;
+
+                            return (
+                                <div key={item.id} className={`p-3 rounded-xl border-2 flex flex-col items-center gap-2 text-center transition-all ${isEquipped ? 'border-garden-500 bg-garden-50' : 'border-gray-100 hover:border-garden-200'}`}>
+                                    <div className="text-3xl mb-1">{item.icon}</div>
+                                    <div className="font-bold text-xs text-gray-700 leading-tight">{item.label}</div>
+                                    
+                                    {isOwned ? (
+                                        <button 
+                                            onClick={() => onPurchaseAccessory(item)}
+                                            disabled={isEquipped}
+                                            className={`w-full py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 ${isEquipped ? 'bg-garden-200 text-garden-800 cursor-default' : 'bg-gray-100 text-gray-600 hover:bg-garden-500 hover:text-white'}`}
+                                        >
+                                            {isEquipped ? <><Check size={10} /> Equipped</> : 'Equip'}
+                                        </button>
+                                    ) : (
+                                        <button 
+                                            onClick={() => onPurchaseAccessory(item)}
+                                            disabled={!canAfford}
+                                            className={`w-full py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 ${canAfford ? 'bg-yellow-400 text-yellow-900 hover:bg-yellow-500 shadow-sm' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                                        >
+                                            {canAfford ? <><Coins size={10} /> {item.cost}</> : <><Lock size={10} /> {item.cost}</>}
+                                        </button>
+                                    )}
+                                </div>
+                            )
+                        })}
+                        
+                        {/* Default None Option */}
+                        <div className={`p-3 rounded-xl border-2 flex flex-col items-center gap-2 text-center transition-all ${user.accessory === Accessory.NONE ? 'border-garden-500 bg-garden-50' : 'border-gray-100 hover:border-garden-200'}`}>
+                             <div className="text-3xl mb-1">🚫</div>
+                             <div className="font-bold text-xs text-gray-700 leading-tight">None</div>
+                             <button 
+                                onClick={() => onPurchaseAccessory({ id: Accessory.NONE, cost: 0 })}
+                                disabled={user.accessory === Accessory.NONE}
+                                className={`w-full py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 ${user.accessory === Accessory.NONE ? 'bg-garden-200 text-garden-800 cursor-default' : 'bg-gray-100 text-gray-600 hover:bg-garden-500 hover:text-white'}`}
+                            >
+                                {user.accessory === Accessory.NONE ? <><Check size={10} /> Equipped</> : 'Equip'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
 
         {/* Right: Switch Character Button */}
