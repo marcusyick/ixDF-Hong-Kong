@@ -106,6 +106,12 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+export interface BroadcastMessage {
+  id: string;
+  text: string;
+  sender: string;
+}
+
 export interface NPCData {
   id: string;
   name: string;
@@ -136,5 +142,11 @@ export interface PlayerSyncData {
 
 export interface CoinData {
   id: string;
+  position: [number, number, number];
+}
+
+export interface FireworkData {
+  id: number;
+  color: string;
   position: [number, number, number];
 }

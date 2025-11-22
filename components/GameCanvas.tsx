@@ -5,11 +5,12 @@ import * as THREE from 'three';
 import { MessageCircle } from 'lucide-react';
 // @ts-ignore
 import { joinRoom } from 'trystero';
-import Scene from './World/Scene';
+import Scene, { Coin } from './World/Scene';
 import Avatar from './Avatar';
-import { UserState, NPCData, ChatMessage, Collider, PlayerSyncData, CoinData } from '../types';
+import { UserState, NPCData, ChatMessage, Collider, PlayerSyncData, CoinData, BroadcastMessage, FireworkData } from '../types';
 import { NPC_LIST } from '../constants';
 
+// ... [Keep usePlayerControls, Loader, VoiceIndicator, AudioListenerController as they were] ...
 function usePlayerControls() {
   const [movement, setMovement] = useState({ forward: false, backward: false, left: false, right: false, shift: false, jump: false });
   useEffect(() => {
@@ -80,7 +81,6 @@ const VoiceIndicator = () => (
   </Html>
 );
 
-// Component to attach AudioListener to the camera
 const AudioListenerController = ({ setListener }: { setListener: (l: THREE.AudioListener) => void }) => {
     const { camera } = useThree();
     useEffect(() => {
@@ -89,22 +89,21 @@ const AudioListenerController = ({ setListener }: { setListener: (l: THREE.Audio
         setListener(listener);
         return () => {
             camera.remove(listener);
-            // We can't really setListener(null) here safely if unmounting happens out of order, 
-            // but state cleanup usually handles it.
         };
     }, [camera, setListener]);
     return null;
 };
 
+// Improved StreamAudio to handle autoplay policies
 const StreamAudio = ({ stream, listener }: { stream: MediaStream, listener: THREE.AudioListener }) => {
     const sound = useRef<THREE.PositionalAudio>(null);
     
     useEffect(() => {
         if (sound.current && stream && listener) {
+            // Ensure context is running
             if (listener.context.state === 'suspended') {
-                listener.context.resume();
+                listener.context.resume().catch(e => console.warn("Audio resume failed", e));
             }
-            // Use standard setMediaStreamSource
             // @ts-ignore
             sound.current.setMediaStreamSource(stream);
             sound.current.setRefDistance(2);
@@ -114,8 +113,6 @@ const StreamAudio = ({ stream, listener }: { stream: MediaStream, listener: THRE
     }, [stream, listener]);
 
     if (!listener) return null;
-
-    // Pass listener as args to constructor
     return <positionalAudio ref={sound} args={[listener]} />
 };
 
@@ -133,51 +130,37 @@ const KickableBall = ({ playerPosRef, onKick, remoteBallState }: KickableBallPro
     
     useFrame((state, delta) => {
         if (!ballRef.current || !playerPosRef.current) return;
-        
         const ballPos = ballRef.current.position;
         
-        // --- SYNC LOGIC ---
-        // If we have a remote update that is newer than our last processed sync
+        // Sync Logic
         if (remoteBallState && remoteBallState.timestamp > lastSyncTime.current) {
-            // Update local ball to match remote state (Dead Reckoning Snap)
             ballPos.set(remoteBallState.position[0], remoteBallState.position[1], remoteBallState.position[2]);
             velocity.current.set(remoteBallState.velocity[0], remoteBallState.velocity[1], remoteBallState.velocity[2]);
             lastSyncTime.current = remoteBallState.timestamp;
         }
 
-        // --- PHYSICS LOGIC ---
+        // Physics Logic
         const playerPos = playerPosRef.current;
         const dist = ballPos.distanceTo(playerPos);
         const KICK_RADIUS = 1.2;
         const KICK_FORCE = 10;
         const now = Date.now();
         
-        // Local collision detection (Kicking)
         if (dist < KICK_RADIUS) {
             const direction = new THREE.Vector3().subVectors(ballPos, playerPos).normalize();
             direction.y = 0;
-            
-            // Apply force locally
             velocity.current.add(direction.multiplyScalar(KICK_FORCE * delta));
-            
-            // Broadcast kick event to others (with throttling to prevent flood)
             if (onKick && (now - lastKickTime.current > 100)) {
                 onKick(velocity.current.toArray(), ballPos.toArray());
                 lastKickTime.current = now;
             }
         }
 
-        // Movement integration
         ballPos.add(velocity.current.clone().multiplyScalar(delta * 5));
-        
-        // Friction
         velocity.current.multiplyScalar(0.95);
-        
-        // Visual Rolling
         ballRef.current.rotation.x += velocity.current.z * 0.1;
         ballRef.current.rotation.z -= velocity.current.x * 0.1;
         
-        // Boundary Bouncing
         if (ballPos.x > 40) { ballPos.x = 40; velocity.current.x *= -0.5; }
         if (ballPos.x < -40) { ballPos.x = -40; velocity.current.x *= -0.5; }
         if (ballPos.z > 40) { ballPos.z = 40; velocity.current.z *= -0.5; }
@@ -196,103 +179,6 @@ const KickableBall = ({ playerPosRef, onKick, remoteBallState }: KickableBallPro
         </mesh>
     )
 }
-
-const Coin = ({ position }: { position: [number, number, number] }) => {
-    const meshRef = useRef<THREE.Group>(null);
-    
-    useFrame((state) => {
-        if (meshRef.current) {
-            meshRef.current.rotation.y += 0.03;
-            meshRef.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 3) * 0.1;
-        }
-    });
-
-    return (
-        <group ref={meshRef} position={position}>
-            <mesh rotation={[Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.3, 0.3, 0.08, 24]} />
-                <meshStandardMaterial color="#fbbf24" metalness={0.8} roughness={0.2} />
-            </mesh>
-            <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.05]}>
-                <cylinderGeometry args={[0.2, 0.2, 0.02, 24]} />
-                <meshStandardMaterial color="#f59e0b" metalness={0.6} roughness={0.3} />
-            </mesh>
-             <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.05]}>
-                <cylinderGeometry args={[0.2, 0.2, 0.02, 24]} />
-                <meshStandardMaterial color="#f59e0b" metalness={0.6} roughness={0.3} />
-            </mesh>
-        </group>
-    )
-}
-
-const CoinManager = ({ playerPosRef, onCollect }: { playerPosRef: React.MutableRefObject<THREE.Vector3>, onCollect: () => void }) => {
-    const [coins, setCoins] = useState<CoinData[]>([]);
-    
-    // Spawn coins logic
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setCoins(currentCoins => {
-                if (currentCoins.length >= 40) return currentCoins; // Cap at 40
-                
-                const x = (Math.random() - 0.5) * 80; // -40 to 40
-                const z = (Math.random() - 0.5) * 80; // -40 to 40
-                
-                // Avoid spawning too close to center (spawn area)
-                if (Math.abs(x) < 5 && Math.abs(z) < 5) return currentCoins;
-
-                const newCoin: CoinData = {
-                    id: Date.now().toString() + Math.random(),
-                    position: [x, 1, z]
-                };
-                return [...currentCoins, newCoin];
-            });
-        }, 3000); // Add coin every 3 seconds
-
-        return () => clearInterval(interval);
-    }, []);
-
-    // Collision Detection
-    useFrame(() => {
-        if (!playerPosRef.current) return;
-
-        const playerPos = playerPosRef.current;
-        const COLLECT_RADIUS = 1.5;
-
-        setCoins(currentCoins => {
-            let collected = false;
-            const remainingCoins = currentCoins.filter(coin => {
-                const dx = playerPos.x - coin.position[0];
-                const dy = playerPos.y - coin.position[1];
-                const dz = playerPos.z - coin.position[2];
-                const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-                
-                if (dist < COLLECT_RADIUS) {
-                    collected = true;
-                    return false; // Remove from list
-                }
-                return true;
-            });
-
-            if (collected) {
-                onCollect();
-            }
-            
-            // Only trigger state update if count changed to avoid re-renders
-            if (remainingCoins.length !== currentCoins.length) {
-                return remainingCoins;
-            }
-            return currentCoins;
-        });
-    });
-
-    return (
-        <group>
-            {coins.map(coin => (
-                <Coin key={coin.id} position={coin.position} />
-            ))}
-        </group>
-    );
-};
 
 const PlayerController = ({ 
     user, 
@@ -318,7 +204,7 @@ const PlayerController = ({
   const prevPos = useRef(new THREE.Vector3(0, 0, 0));
   const velocityY = useRef(0);
   
-  const myLatestMsg = messages.filter(m => m.isUser).pop();
+  const myLatestMsg = messages.filter(m => m.sender === user.name).pop();
   const [displayedMsg, setDisplayedMsg] = useState<string | null>(null);
   
   useEffect(() => {
@@ -348,7 +234,6 @@ const PlayerController = ({
     const speed = shift ? 7 : 4;
     const moveDir = new THREE.Vector3(0, 0, 0);
     
-    // --- Movement Logic ---
     if (forward || backward || left || right) {
         const camDir = new THREE.Vector3();
         camera.getWorldDirection(camDir);
@@ -389,51 +274,37 @@ const PlayerController = ({
         setIsMoving(false);
     }
 
-    // --- Ground Detection (Raycast) ---
     const raycaster = new THREE.Raycaster();
     const rayOrigin = groupRef.current.position.clone().add(new THREE.Vector3(0, 20, 0));
     raycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
-    
-    // Intersect with everything in scene
     const intersects = raycaster.intersectObjects(scene.children, true);
-    
     let groundHeight = 0;
-    // Find the highest "walkable" point
     for (let hit of intersects) {
-        // Ensure we don't hit the player itself (sometimes happens if shadow/accessories get hit)
-        // We rely on userData.walkable to identify terrain
         if (hit.object.userData.walkable) {
             groundHeight = hit.point.y;
             break; 
         }
     }
 
-    // --- Gravity & Jump ---
     const GRAVITY = 20;
     const JUMP_FORCE = 8;
     
     velocityY.current -= GRAVITY * delta;
     groupRef.current.position.y += velocityY.current * delta;
 
-    // Ground collision
     if (groupRef.current.position.y <= groundHeight) {
         groupRef.current.position.y = groundHeight;
         velocityY.current = 0;
         if (jump) velocityY.current = JUMP_FORCE;
     }
 
-    // Update Refs
     playerPosRef.current.copy(groupRef.current.position);
     if (onUpdateState) onUpdateState(groupRef.current.rotation.y, isMoving);
 
-    // --- Shadow & Camera ---
     if (shadowRef.current) {
         shadowRef.current.position.x = groupRef.current.position.x;
         shadowRef.current.position.z = groupRef.current.position.z;
-        // Shadow sticks to groundHeight or slightly above, but for simplicity, stick to player Y or ground
-        // Actually shadow should project to ground.
         shadowRef.current.position.y = groundHeight + 0.02;
-        
         const heightDiff = groupRef.current.position.y - groundHeight;
         const scale = Math.max(0.5, 1 - heightDiff * 0.2); 
         shadowRef.current.scale.setScalar(scale);
@@ -450,7 +321,7 @@ const PlayerController = ({
     prevPos.current.copy(currentPos);
   });
 
-  const isGrounded = groupRef.current ? (groupRef.current.position.y - 0.05) <= (playerPosRef.current.y) : true; // Approx check
+  const isGrounded = groupRef.current ? (groupRef.current.position.y - 0.05) <= (playerPosRef.current.y) : true;
 
   return (
     <group>
@@ -509,7 +380,7 @@ const RemotePeer: React.FC<RemotePeerProps> = ({
     const groupRef = useRef<THREE.Group>(null);
     const targetPos = useRef(new THREE.Vector3(...data.position));
     
-    const latestMsg = chatHistory.filter(m => m.sender === data.user.name && !m.isUser).pop();
+    const latestMsg = chatHistory.filter(m => m.sender === data.user.name).pop();
     const [displayedMsg, setDisplayedMsg] = useState<string | null>(null);
 
     useEffect(() => {
@@ -575,7 +446,6 @@ const NPC: React.FC<NPCProps> = ({
     const latestMsg = chatHistory.filter(m => m.sender === data.name).pop();
     const [displayedMsg, setDisplayedMsg] = useState<string | null>(null);
     const groupRef = useRef<THREE.Group>(null);
-    
     const isInteracting = nearbyNPC === data.name;
 
     useEffect(() => {
@@ -633,12 +503,28 @@ const NPC: React.FC<NPCProps> = ({
     );
 }
 
+const seededRandom = (seed: number) => {
+    const x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
+};
+
+// Generate initial deterministic coins
+const INITIAL_COINS: CoinData[] = Array.from({ length: 40 }).map((_, i) => {
+    const r1 = seededRandom(i * 77.7);
+    const r2 = seededRandom(i * 33.3);
+    const x = (r1 - 0.5) * 80; 
+    const z = (r2 - 0.5) * 80;
+    // Skip center spawn
+    if (Math.abs(x) < 5 && Math.abs(z) < 5) return { id: `init-${i}`, position: [20, 1, 20] }; // fallback
+    return { id: `init-${i}`, position: [x, 1, z] };
+});
+
 interface GameCanvasProps {
     user: UserState;
     chatHistory: ChatMessage[];
     nearbyNPC: string | null;
     setNearbyNPC: (name: string | null) => void;
-    broadcastMessage: { text: string, id: string } | null;
+    broadcastMessage: BroadcastMessage | null;
     onRemoteChat: (sender: string, text: string) => void;
     micStream: MediaStream | null;
     onPlayerListUpdate?: (players: string[]) => void;
@@ -663,19 +549,24 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const [remotePeers, setRemotePeers] = useState<Record<string, PlayerSyncData>>({});
   const [peerStreams, setPeerStreams] = useState<Record<string, MediaStream>>({});
   const [ballState, setBallState] = useState<{ velocity: number[], position: number[], timestamp: number } | null>(null);
-  const roomRef = useRef<any>(null);
   
-  // Audio Listener for the Camera
+  // Synced Game State
+  const [coins, setCoins] = useState<CoinData[]>(INITIAL_COINS);
+  const [fireworks, setFireworks] = useState<FireworkData[]>([]);
+
+  const roomRef = useRef<any>(null);
   const [audioListener, setAudioListener] = useState<THREE.AudioListener | null>(null);
   
   useEffect(() => {
-      const config = { appId: 'ixdf-garden-v1' };
+      const config = { appId: 'ixdf-garden-v2-sync' };
       const room = joinRoom(config, 'playground');
       roomRef.current = room;
       
       const [sendState, getState] = room.makeAction('state');
       const [sendChat, getChat] = room.makeAction('chat');
       const [sendBall, getBall] = room.makeAction('ball');
+      const [sendFirework, getFirework] = room.makeAction('firework');
+      const [sendCoin, getCoin] = room.makeAction('coin');
       
       getState((data: PlayerSyncData, peerId: string) => {
           setRemotePeers(prev => ({ ...prev, [peerId]: { ...data, id: peerId } }));
@@ -689,21 +580,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           setBallState(data);
       });
       
+      // Handle Firework Launch Event
+      getFirework((data: FireworkData, peerId: string) => {
+          setFireworks(prev => [...prev, data]);
+      });
+
+      // Handle Coin Events (Collect & Spawn)
+      getCoin((data: { type: 'collect'|'spawn', id?: string, coin?: CoinData }, peerId: string) => {
+          if (data.type === 'collect' && data.id) {
+              setCoins(prev => prev.filter(c => c.id !== data.id));
+          } else if (data.type === 'spawn' && data.coin) {
+              setCoins(prev => [...prev, data.coin!]);
+          }
+      });
+      
       room.onPeerStream((stream: MediaStream, peerId: string) => {
           setPeerStreams(prev => ({ ...prev, [peerId]: stream }));
       });
       
       room.onPeerLeave((peerId: string) => {
-          setRemotePeers(prev => {
-              const next = { ...prev };
-              delete next[peerId];
-              return next;
-          });
-          setPeerStreams(prev => {
-              const next = { ...prev };
-              delete next[peerId];
-              return next;
-          });
+          setRemotePeers(prev => { const next = { ...prev }; delete next[peerId]; return next; });
+          setPeerStreams(prev => { const next = { ...prev }; delete next[peerId]; return next; });
       });
       
       const interval = setInterval(() => {
@@ -721,39 +618,42 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       
       (window as any).__sendChat = sendChat;
       (window as any).__sendBall = sendBall;
+      (window as any).__sendFirework = sendFirework;
+      (window as any).__sendCoin = sendCoin;
 
       return () => {
           clearInterval(interval);
           room.leave();
       }
-  }, []); // Run once
+  }, []); 
 
-  // Handle local stream changes for Trystero
   useEffect(() => {
       if (roomRef.current && micStream) {
           try {
               roomRef.current.addStream(micStream);
+              // Force resume audio context when we start streaming to ensure we can hear others
+              if (audioListener && audioListener.context.state === 'suspended') {
+                  audioListener.context.resume();
+              }
           } catch(e) {
-              console.warn("Stream already added or error", e);
+              console.warn("Stream error", e);
           }
           return () => {
-              try {
-                 roomRef.current.removeStream(micStream);
-              } catch(e) {}
+              try { roomRef.current.removeStream(micStream); } catch(e) {}
           };
       }
-  }, [micStream]);
+  }, [micStream, audioListener]);
 
   useEffect(() => {
       if (broadcastMessage && (window as any).__sendChat) {
+          // Broadcast as the specific sender (User or NPC)
           (window as any).__sendChat({
               text: broadcastMessage.text,
-              sender: user.name
+              sender: broadcastMessage.sender
           });
       }
   }, [broadcastMessage]);
 
-  // Sync player list to parent
   useEffect(() => {
       if (onPlayerListUpdate) {
           const names = Object.values(remotePeers).map(p => p.user.name);
@@ -761,14 +661,87 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       }
   }, [remotePeers, onPlayerListUpdate]);
 
+  // --- Coin Collection Logic (Hostless) ---
+  useFrame(() => {
+      if (!playerPosRef.current) return;
+      const playerPos = playerPosRef.current;
+      const COLLECT_RADIUS = 1.5;
+
+      setCoins(currentCoins => {
+          let collectedCoinId: string | null = null;
+          
+          const remaining = currentCoins.filter(c => {
+              const dx = playerPos.x - c.position[0];
+              const dy = playerPos.y - c.position[1];
+              const dz = playerPos.z - c.position[2];
+              if (Math.sqrt(dx*dx + dy*dy + dz*dz) < COLLECT_RADIUS) {
+                  collectedCoinId = c.id;
+                  return false;
+              }
+              return true;
+          });
+
+          if (collectedCoinId) {
+              if (onCoinCollected) onCoinCollected();
+              
+              // 1. Tell everyone to remove it
+              if ((window as any).__sendCoin) {
+                  (window as any).__sendCoin({ type: 'collect', id: collectedCoinId });
+              }
+
+              // 2. Wait and Respawn (Hostless responsibility)
+              setTimeout(() => {
+                  const x = (Math.random() - 0.5) * 80;
+                  const z = (Math.random() - 0.5) * 80;
+                  if (Math.abs(x) > 5 || Math.abs(z) > 5) {
+                    const newCoin: CoinData = {
+                        id: Date.now().toString() + Math.random(),
+                        position: [x, 1, z]
+                    };
+                    if ((window as any).__sendCoin) {
+                        (window as any).__sendCoin({ type: 'spawn', coin: newCoin });
+                        // Also add locally for the spawner
+                        setCoins(prev => [...prev, newCoin]);
+                    }
+                  }
+              }, 3000);
+
+              return remaining;
+          }
+          return currentCoins;
+      });
+  });
+
   const handleLocalUpdate = (rotation: number, moving: boolean) => {
       rotationRef.current = rotation;
       isMovingRef.current = moving;
+      // Resume AudioContext on movement interaction to fix autoplay policies
+      if (audioListener && audioListener.context.state === 'suspended') {
+          audioListener.context.resume();
+      }
   }
   
   const handleBallKick = (velocity: number[], position: number[]) => {
       if ((window as any).__sendBall) {
           (window as any).__sendBall({ velocity, position, timestamp: Date.now() });
+      }
+  };
+
+  const handleLaunchFirework = () => {
+      const colors = ['#ef4444', '#3b82f6', '#eab308', '#a855f7', '#ec4899', '#22c55e'];
+      const randomColor = colors[Math.floor(Math.random() * colors.length)];
+      const newFirework: FireworkData = {
+          id: Date.now(),
+          color: randomColor,
+          position: [4.5, 0, -4] // Launcher pos
+      };
+      
+      // Add locally
+      setFireworks(prev => [...prev, newFirework]);
+      
+      // Broadcast
+      if ((window as any).__sendFirework) {
+          (window as any).__sendFirework(newFirework);
       }
   };
 
@@ -778,7 +751,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
          <AudioListenerController setListener={setAudioListener} />
          <fog attach="fog" args={['#e0f2fe', 10, 50]} />
          <Suspense fallback={<Loader />}>
-           <Scene setColliders={setColliders} playerPosRef={playerPosRef} />
+           <Scene 
+                setColliders={setColliders} 
+                playerPosRef={playerPosRef}
+                fireworks={fireworks}
+                onLaunchFirework={handleLaunchFirework}
+                onRemoveFirework={(id) => setFireworks(prev => prev.filter(fw => fw.id !== id))}
+           >
+               {/* Render Coins inside Scene so they share the coordinate space */}
+               {coins.map(c => <Coin key={c.id} position={c.position} />)}
+           </Scene>
+           
            <PlayerController 
               user={user} 
               messages={chatHistory}
@@ -787,10 +770,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               onUpdateState={handleLocalUpdate}
               isMicOn={!!micStream}
            />
-           <CoinManager 
-              playerPosRef={playerPosRef} 
-              onCollect={() => onCoinCollected && onCoinCollected()} 
-           />
+           
             <KickableBall 
                 playerPosRef={playerPosRef} 
                 onKick={handleBallKick}

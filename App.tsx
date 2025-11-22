@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import CharacterSelection from './components/CharacterSelection';
 import GameCanvas from './components/GameCanvas';
 import UIOverlay from './components/UIOverlay';
-import { UserState, ChatMessage, Accessory } from './types';
+import { UserState, ChatMessage, Accessory, BroadcastMessage } from './types';
 import { NPC_LIST } from './constants';
 
 function App() {
@@ -15,7 +15,7 @@ function App() {
   const [score, setScore] = useState(0);
   
   // Multiplayer Chat Signals
-  const [broadcastMessage, setBroadcastMessage] = useState<{text: string, id: string} | null>(null);
+  const [broadcastMessage, setBroadcastMessage] = useState<BroadcastMessage | null>(null);
 
   const handleMicToggle = useCallback(async () => {
     const newState = !isListening;
@@ -78,10 +78,12 @@ function App() {
   }, [isListening]);
 
   const handleSendMessage = async (text: string) => {
+    if (!user) return;
+
     const msgId = Date.now().toString();
     const newUserMsg: ChatMessage = {
       id: msgId,
-      sender: user?.name || 'Me',
+      sender: user.name,
       text: text,
       isUser: true,
       timestamp: Date.now()
@@ -89,8 +91,8 @@ function App() {
 
     setChatHistory(prev => [...prev, newUserMsg]);
     
-    // Trigger broadcast to other players
-    setBroadcastMessage({ text, id: msgId });
+    // Trigger broadcast to other players (as Self)
+    setBroadcastMessage({ text, sender: user.name, id: msgId });
 
     // Check if near an NPC to talk to
     if (nearbyNPC) {
@@ -99,8 +101,9 @@ function App() {
         // Pick a random hardcoded response
         const randomResponse = npc.responses[Math.floor(Math.random() * npc.responses.length)];
         
+        const npcMsgId = (Date.now() + 1).toString();
         const npcMsg: ChatMessage = {
-            id: (Date.now() + 1).toString(),
+            id: npcMsgId,
             sender: npc.name,
             text: randomResponse,
             isUser: false,
@@ -110,6 +113,9 @@ function App() {
         // Small delay to feel natural
         setTimeout(() => {
             setChatHistory(prev => [...prev, npcMsg]);
+            // CRITICAL: Broadcast the NPC's response to everyone else
+            // so they see the NPC talking too.
+            setBroadcastMessage({ text: randomResponse, sender: npc.name, id: npcMsgId });
         }, 600);
       }
     }
