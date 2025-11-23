@@ -10,7 +10,6 @@ import Avatar from './Avatar';
 import { UserState, NPCData, ChatMessage, Collider, PlayerSyncData, CoinData, BroadcastMessage, FireworkData } from '../types';
 import { NPC_LIST } from '../constants';
 
-// ... [Keep usePlayerControls, Loader, VoiceIndicator, AudioListenerController as they were] ...
 function usePlayerControls() {
   const [movement, setMovement] = useState({ forward: false, backward: false, left: false, right: false, shift: false, jump: false });
   useEffect(() => {
@@ -519,6 +518,78 @@ const INITIAL_COINS: CoinData[] = Array.from({ length: 40 }).map((_, i) => {
     return { id: `init-${i}`, position: [x, 1, z] };
 });
 
+// Extracted Component for Coin Logic to run inside Canvas
+const CoinCollectionLogic = ({ 
+    playerPosRef, 
+    coinsRef, 
+    setCoins, 
+    onCoinCollected 
+}: { 
+    playerPosRef: React.MutableRefObject<THREE.Vector3>,
+    coinsRef: React.MutableRefObject<CoinData[]>,
+    setCoins: React.Dispatch<React.SetStateAction<CoinData[]>>,
+    onCoinCollected?: () => void
+}) => {
+    useFrame(() => {
+      if (!playerPosRef.current) return;
+      const playerPos = playerPosRef.current;
+      const COLLECT_RADIUS = 1.5;
+
+      // Use ref for calculation to avoid updating state during render unless necessary
+      const currentCoins = coinsRef.current;
+      let collectedCoinId: string | null = null;
+
+      for (const c of currentCoins) {
+           const dx = playerPos.x - c.position[0];
+           const dy = playerPos.y - c.position[1];
+           const dz = playerPos.z - c.position[2];
+           if (Math.sqrt(dx*dx + dy*dy + dz*dz) < COLLECT_RADIUS) {
+               collectedCoinId = c.id;
+               break; 
+           }
+      }
+
+      if (collectedCoinId) {
+          if (onCoinCollected) onCoinCollected();
+          
+          // Update Local immediately to prevent double collection
+          setCoins(prev => {
+               const next = prev.filter(c => c.id !== collectedCoinId);
+               coinsRef.current = next;
+               return next;
+          });
+
+          // 1. Tell everyone to remove it
+          if ((window as any).__sendCoin) {
+              (window as any).__sendCoin({ type: 'collect', id: collectedCoinId });
+          }
+
+          // 2. Wait and Respawn (Hostless responsibility)
+          setTimeout(() => {
+              const x = (Math.random() - 0.5) * 80;
+              const z = (Math.random() - 0.5) * 80;
+              if (Math.abs(x) > 5 || Math.abs(z) > 5) {
+                const newCoin: CoinData = {
+                    id: Date.now().toString() + Math.random(),
+                    position: [x, 1, z]
+                };
+                if ((window as any).__sendCoin) {
+                    (window as any).__sendCoin({ type: 'spawn', coin: newCoin });
+                    // Also add locally for the spawner
+                    setCoins(prev => {
+                        const next = [...prev, newCoin];
+                        coinsRef.current = next;
+                        return next;
+                    });
+                }
+              }
+          }, 3000);
+      }
+    });
+
+    return null;
+}
+
 interface GameCanvasProps {
     user: UserState;
     chatHistory: ChatMessage[];
@@ -552,12 +623,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   
   // Synced Game State
   const [coins, setCoins] = useState<CoinData[]>(INITIAL_COINS);
+  const coinsRef = useRef(INITIAL_COINS); // Use ref for physics checks loop
   const [fireworks, setFireworks] = useState<FireworkData[]>([]);
 
   const roomRef = useRef<any>(null);
   const [audioListener, setAudioListener] = useState<THREE.AudioListener | null>(null);
   
   useEffect(() => {
+      // Clean up previous room if any (Strict mode safety)
+      if (roomRef.current) {
+          roomRef.current.leave();
+      }
+
       const config = { appId: 'ixdf-garden-v2-sync' };
       const room = joinRoom(config, 'playground');
       roomRef.current = room;
@@ -588,9 +665,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       // Handle Coin Events (Collect & Spawn)
       getCoin((data: { type: 'collect'|'spawn', id?: string, coin?: CoinData }, peerId: string) => {
           if (data.type === 'collect' && data.id) {
-              setCoins(prev => prev.filter(c => c.id !== data.id));
+              setCoins(prev => {
+                  const next = prev.filter(c => c.id !== data.id);
+                  coinsRef.current = next;
+                  return next;
+              });
           } else if (data.type === 'spawn' && data.coin) {
-              setCoins(prev => [...prev, data.coin!]);
+              setCoins(prev => {
+                  const next = [...prev, data.coin!];
+                  coinsRef.current = next;
+                  return next;
+              });
           }
       });
       
@@ -623,7 +708,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
       return () => {
           clearInterval(interval);
-          room.leave();
+          if (roomRef.current) {
+             roomRef.current.leave();
+             roomRef.current = null;
+          }
       }
   }, []); 
 
@@ -639,18 +727,23 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               console.warn("Stream error", e);
           }
           return () => {
-              try { roomRef.current.removeStream(micStream); } catch(e) {}
+              if (roomRef.current && micStream) {
+                  try { roomRef.current.removeStream(micStream); } catch(e) {}
+              }
           };
       }
   }, [micStream, audioListener]);
 
   useEffect(() => {
       if (broadcastMessage && (window as any).__sendChat) {
-          // Broadcast as the specific sender (User or NPC)
-          (window as any).__sendChat({
-              text: broadcastMessage.text,
-              sender: broadcastMessage.sender
-          });
+          try {
+            (window as any).__sendChat({
+                text: broadcastMessage.text,
+                sender: broadcastMessage.sender
+            });
+          } catch (e) {
+              console.error("Failed to send chat", e);
+          }
       }
   }, [broadcastMessage]);
 
@@ -660,57 +753,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           onPlayerListUpdate(names);
       }
   }, [remotePeers, onPlayerListUpdate]);
-
-  // --- Coin Collection Logic (Hostless) ---
-  useFrame(() => {
-      if (!playerPosRef.current) return;
-      const playerPos = playerPosRef.current;
-      const COLLECT_RADIUS = 1.5;
-
-      setCoins(currentCoins => {
-          let collectedCoinId: string | null = null;
-          
-          const remaining = currentCoins.filter(c => {
-              const dx = playerPos.x - c.position[0];
-              const dy = playerPos.y - c.position[1];
-              const dz = playerPos.z - c.position[2];
-              if (Math.sqrt(dx*dx + dy*dy + dz*dz) < COLLECT_RADIUS) {
-                  collectedCoinId = c.id;
-                  return false;
-              }
-              return true;
-          });
-
-          if (collectedCoinId) {
-              if (onCoinCollected) onCoinCollected();
-              
-              // 1. Tell everyone to remove it
-              if ((window as any).__sendCoin) {
-                  (window as any).__sendCoin({ type: 'collect', id: collectedCoinId });
-              }
-
-              // 2. Wait and Respawn (Hostless responsibility)
-              setTimeout(() => {
-                  const x = (Math.random() - 0.5) * 80;
-                  const z = (Math.random() - 0.5) * 80;
-                  if (Math.abs(x) > 5 || Math.abs(z) > 5) {
-                    const newCoin: CoinData = {
-                        id: Date.now().toString() + Math.random(),
-                        position: [x, 1, z]
-                    };
-                    if ((window as any).__sendCoin) {
-                        (window as any).__sendCoin({ type: 'spawn', coin: newCoin });
-                        // Also add locally for the spawner
-                        setCoins(prev => [...prev, newCoin]);
-                    }
-                  }
-              }, 3000);
-
-              return remaining;
-          }
-          return currentCoins;
-      });
-  });
 
   const handleLocalUpdate = (rotation: number, moving: boolean) => {
       rotationRef.current = rotation;
@@ -751,6 +793,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
          <AudioListenerController setListener={setAudioListener} />
          <fog attach="fog" args={['#e0f2fe', 10, 50]} />
          <Suspense fallback={<Loader />}>
+           {/* Render the logic component INSIDE Canvas */}
+           <CoinCollectionLogic 
+             playerPosRef={playerPosRef}
+             coinsRef={coinsRef}
+             setCoins={setCoins}
+             onCoinCollected={onCoinCollected}
+           />
+           
            <Scene 
                 setColliders={setColliders} 
                 playerPosRef={playerPosRef}

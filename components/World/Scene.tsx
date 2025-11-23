@@ -197,7 +197,13 @@ const FireworkLauncher: React.FC<{
 
 const Flag: React.FC<{ position: [number, number, number] }> = ({ position }) => {
     const flagRef = useRef<Mesh>(null);
-    const texture = useTexture('https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Flag_of_Hong_Kong.svg/640px-Flag_of_Hong_Kong.svg.png');
+    let texture = null;
+    try {
+       // Use texture safely or fallback if suspense fails/blocks
+       texture = useTexture('https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Flag_of_Hong_Kong.svg/640px-Flag_of_Hong_Kong.svg.png');
+    } catch (e) {
+       console.warn("Texture failed to load", e);
+    }
 
     useFrame((state) => {
         if (!flagRef.current) return;
@@ -222,7 +228,11 @@ const Flag: React.FC<{ position: [number, number, number] }> = ({ position }) =>
             </mesh>
             <mesh ref={flagRef} position={[0.6, 2.5, 0]}>
                 <planeGeometry args={[1.2, 0.8, 15, 10]} />
-                <meshStandardMaterial map={texture} side={DoubleSide} roughness={0.4} />
+                {texture ? (
+                   <meshStandardMaterial map={texture} side={DoubleSide} roughness={0.4} />
+                ) : (
+                   <meshStandardMaterial color="#ef4444" side={DoubleSide} roughness={0.4} />
+                )}
             </mesh>
         </group>
     )
