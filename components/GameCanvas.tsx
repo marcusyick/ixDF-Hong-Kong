@@ -629,6 +629,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const roomRef = useRef<any>(null);
   const [audioListener, setAudioListener] = useState<THREE.AudioListener | null>(null);
   
+  // Fix 1: Use a Ref for User to ensure Sync Loop grabs the latest prop (Accessory changes)
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
+
   useEffect(() => {
       // Clean up previous room if any (Strict mode safety)
       if (roomRef.current) {
@@ -691,7 +695,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const interval = setInterval(() => {
           const myData: PlayerSyncData = {
               id: 'me',
-              user: user,
+              user: userRef.current, // Use ref to get latest accessory updates
               position: [playerPosRef.current.x, playerPosRef.current.y, playerPosRef.current.z],
               rotation: rotationRef.current,
               isMoving: isMovingRef.current,
@@ -714,6 +718,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           }
       }
   }, []); 
+
+  // Fix 2: Global listener to force resume AudioContext on interaction
+  useEffect(() => {
+    const resumeAudio = () => {
+        if (audioListener && audioListener.context.state === 'suspended') {
+            audioListener.context.resume().catch(e => console.warn("Could not resume audio", e));
+        }
+    };
+    
+    window.addEventListener('click', resumeAudio);
+    window.addEventListener('keydown', resumeAudio);
+    return () => {
+        window.removeEventListener('click', resumeAudio);
+        window.removeEventListener('keydown', resumeAudio);
+    };
+  }, [audioListener]);
 
   useEffect(() => {
       if (roomRef.current && micStream) {
@@ -757,10 +777,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const handleLocalUpdate = (rotation: number, moving: boolean) => {
       rotationRef.current = rotation;
       isMovingRef.current = moving;
-      // Resume AudioContext on movement interaction to fix autoplay policies
-      if (audioListener && audioListener.context.state === 'suspended') {
-          audioListener.context.resume();
-      }
   }
   
   const handleBallKick = (velocity: number[], position: number[]) => {

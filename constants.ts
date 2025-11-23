@@ -67,5 +67,47 @@ export const NPC_LIST: NPCData[] = [
     ],
     useThinking: false,
     accessory: Accessory.FLOWER
+  },
+  {
+    id: 'npc_4',
+    name: 'Alex (Visual Designer)',
+    characterType: CharacterType.ROBOT,
+    color: '#a855f7',
+    position: [12, 0, -5],
+    persona: "You are Alex, a trendy Visual Designer.",
+    responses: [
+      "I'm totally into generative art right now. Do you use any AI tools for visuals?",
+      "The colors in this garden are so relaxing. Great for creative inspiration!",
+      "I'd love to hear how you handle visual consistency in your projects."
+    ],
+    accessory: Accessory.BASEBALL_HAT
+  },
+  {
+    id: 'npc_5',
+    name: 'Fiona (Product Owner)',
+    characterType: CharacterType.BEAR,
+    color: '#ec4899',
+    position: [-5, 0, 10],
+    persona: "You are Fiona, a pragmatic Product Owner.",
+    responses: [
+      "I'm always looking for ways to improve team collaboration. How does your team work together?",
+      "Efficiency is key! But we shouldn't sacrifice user experience for speed.",
+      "What topics should we cover in the next meetup? I'm taking suggestions!"
+    ],
+    accessory: Accessory.CROWN
+  },
+  {
+    id: 'npc_6',
+    name: 'Ben (Student)',
+    characterType: CharacterType.RABBIT,
+    color: '#84cc16',
+    position: [20, 0, 15],
+    persona: "You are Ben, an eager design student.",
+    responses: [
+      "I'm just starting out in UX. Do you have any advice on building a portfolio?",
+      "Everything here is so cool! I want to learn how to build 3D spaces like this.",
+      "I'm hoping to find a mentor here. Everyone seems so nice!"
+    ],
+    accessory: Accessory.BALLOON
   }
 ];

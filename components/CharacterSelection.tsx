@@ -1,18 +1,32 @@
 import React, { useState } from 'react';
 import { Canvas, ThreeElements } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
+import { Mic, MicOff } from 'lucide-react';
 import Avatar from './Avatar';
 import { CHARACTER_OPTIONS, ACCESSORY_OPTIONS } from '../constants';
 import { CharacterType, UserState, Accessory } from '../types';
 
 interface Props {
-  onComplete: (user: UserState) => void;
+  onComplete: (user: UserState, initialStream: MediaStream | null) => void;
 }
 
 const CharacterSelection: React.FC<Props> = ({ onComplete }) => {
   const [name, setName] = useState('');
   const [selectedChar, setSelectedChar] = useState(CHARACTER_OPTIONS[0]);
   const [selectedAccessory, setSelectedAccessory] = useState<Accessory>(Accessory.NONE);
+  const [isMicEnabled, setIsMicEnabled] = useState(false);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+
+  const handleMicRequest = async () => {
+      try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          setMediaStream(stream);
+          setIsMicEnabled(true);
+      } catch (err) {
+          console.error("Failed to access microphone", err);
+          setIsMicEnabled(false);
+      }
+  };
 
   const handleStart = () => {
     if (name.trim()) {
@@ -22,7 +36,7 @@ const CharacterSelection: React.FC<Props> = ({ onComplete }) => {
         color: selectedChar.color,
         accessory: selectedAccessory,
         unlockedAccessories: [Accessory.NONE, selectedAccessory]
-      });
+      }, mediaStream);
     }
   };
 
@@ -106,6 +120,28 @@ const CharacterSelection: React.FC<Props> = ({ onComplete }) => {
                     </button>
                 ))}
             </div>
+          </div>
+          
+          <div className="pt-2">
+              <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors">
+                  <input 
+                    type="checkbox" 
+                    className="w-5 h-5 rounded border-gray-300 text-garden-600 focus:ring-garden-500"
+                    checked={isMicEnabled}
+                    onChange={(e) => {
+                        if (e.target.checked) handleMicRequest();
+                        else {
+                            setMediaStream(null);
+                            setIsMicEnabled(false);
+                        }
+                    }}
+                  />
+                  <div className="flex-1 flex items-center justify-between">
+                      <span className="text-sm font-semibold text-gray-700">Enable Microphone for Voice Chat</span>
+                      {isMicEnabled ? <Mic size={18} className="text-garden-600" /> : <MicOff size={18} className="text-gray-400" />}
+                  </div>
+              </label>
+              <p className="text-xs text-gray-400 mt-1 pl-1">Recommended: Enable mic now to ensure voice chat works immediately.</p>
           </div>
 
           <button

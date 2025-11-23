@@ -498,10 +498,12 @@ const AgendaBoard: React.FC<{ position: [number, number, number], rotation?: [nu
         <Text position={[-0.7, -0.2, 0]} fontSize={0.25} color="#0f172a" fontWeight="bold" anchorX="center" anchorY="top">
             Topic suggestions:
         </Text>
-        <Text position={[-1.9, -0.55, 0]} fontSize={0.14} color="#334155" anchorX="left" anchorY="top" maxWidth={4.0} lineHeight={1.5}>
+        <Text position={[-1.9, -0.55, 0]} fontSize={0.13} color="#334155" anchorX="left" anchorY="top" maxWidth={4.2} lineHeight={1.5}>
             • Why are you here?{'\n'}
             • How do you think the community can help each other?{'\n'}
-            • Do you use AI in design? What tools have you been using?
+            • Do you use AI in design? What tools have you been using?{'\n'}
+            • How would you prefer to in our next meeting?{'\n'}
+            • Any topic you want to discuss next time?
         </Text>
     </group>
   </group>

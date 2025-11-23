@@ -22,6 +22,10 @@ function App() {
     setIsListening(newState);
 
     if (newState) {
+        if (micStream && micStream.active) {
+            // Already have a stream, just ensure it's not muted logic wise
+            return; 
+        }
         try {
             // Request Microphone Stream for WebRTC
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -165,8 +169,16 @@ function App() {
       }
   };
 
+  const handleCharacterSelectionComplete = (newUser: UserState, initialStream: MediaStream | null) => {
+      setUser(newUser);
+      if (initialStream) {
+          setMicStream(initialStream);
+          setIsListening(true);
+      }
+  }
+
   if (!user) {
-    return <CharacterSelection onComplete={setUser} />;
+    return <CharacterSelection onComplete={handleCharacterSelectionComplete} />;
   }
 
   return (
