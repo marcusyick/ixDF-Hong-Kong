@@ -223,6 +223,9 @@ const PlayerController = ({
   const [displayedMsg, setDisplayedMsg] = useState<string | null>(null);
   const [closestPeerName, setClosestPeerName] = useState<string | null>(null);
   
+  // Dummy object for calculating smooth rotations
+  const dummyObj = useMemo(() => new THREE.Object3D(), []);
+
   useEffect(() => {
       if (myLatestMsg) {
           setDisplayedMsg(myLatestMsg.text);
@@ -275,6 +278,18 @@ const PlayerController = ({
         const targetPos = new THREE.Vector3(...targetPeer.position);
         const myPos = groupRef.current.position.clone();
         
+        // 1. Calculate Rotation Target (Always look at leader)
+        const lookAtPos = targetPos.clone();
+        lookAtPos.y = myPos.y; // Keep looking horizontal
+        
+        // Only rotate if we have a valid direction
+        if (myPos.distanceTo(lookAtPos) > 0.1) {
+            dummyObj.position.copy(myPos);
+            dummyObj.lookAt(lookAtPos);
+            // Smoothly rotate towards the target
+            groupRef.current.quaternion.slerp(dummyObj.quaternion, 10 * delta);
+        }
+
         const dist = myPos.distanceTo(targetPos);
         const followDist = 1.5; // Distance to keep behind
         
@@ -284,11 +299,6 @@ const PlayerController = ({
             // Simple lerp for smooth following
             const speed = 6;
             const step = direction.multiplyScalar(speed * delta);
-            
-            // Look at target
-            const lookAtPos = targetPos.clone();
-            lookAtPos.y = myPos.y; // Keep looking horizontal
-            groupRef.current.lookAt(lookAtPos);
             
             // Check collision before moving
             const potentialPos = myPos.clone().add(step);
@@ -768,7 +778,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     let minDist = 3.5; 
                     let targetId: string | null = null;
 
-                    Object.values(remotePeersRef.current).forEach(peer => {
+                    Object.values(remotePeersRef.current).forEach((peer: PlayerSyncData) => {
                         const peerPos = new THREE.Vector3(...peer.position);
                         const dist = myPos.distanceTo(peerPos);
                         if (dist < minDist) {
