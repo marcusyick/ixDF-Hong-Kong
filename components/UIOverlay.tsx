@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Send, Smile, Users, Coins, ShoppingBag, Check, Lock } from 'lucide-react';
+import { Mic, MicOff, Send, Smile, Users, Coins, ShoppingBag, Check, Lock, MessageSquare } from 'lucide-react';
 import { UserState, ChatMessage, Accessory } from '../types';
 import { SHOP_ITEMS } from '../constants';
 
 interface UIOverlayProps {
   user: UserState;
-  chatHistory: ChatMessage[]; // kept in props to avoid breaking parent, even if not used for list
+  chatHistory: ChatMessage[]; 
   onSendMessage: (text: string) => void;
   onMicToggle: () => void;
   isListening: boolean;
@@ -20,6 +20,7 @@ const EMOJI_LIST = ['😀', '😂', '😍', '😎', '🤔', '😭', '😡', '�
 
 const UIOverlay: React.FC<UIOverlayProps> = ({
   user,
+  chatHistory,
   onSendMessage,
   onMicToggle,
   isListening,
@@ -32,6 +33,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [inputValue, setInputValue] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,11 +51,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
   const handleEmojiClick = (emoji: string) => {
     setInputValue(prev => prev + emoji);
-    // Optional: focus input back?
   };
 
   return (
-    <div className="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between">
+    <div className="absolute inset-0 pointer-events-none z-[200] flex flex-col justify-between">
       {/* Top Bar */}
       <div className="p-4 pointer-events-auto flex justify-between items-start">
         {/* Left: Info */}
@@ -174,72 +180,102 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* Emoji Picker Panel */}
-      {showEmojiPicker && (
-        <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 pointer-events-auto z-30 animate-in fade-in slide-in-from-bottom-4 duration-200">
-            <div className="bg-white/90 backdrop-blur-xl p-4 rounded-2xl shadow-2xl border border-white/60 grid grid-cols-8 gap-2">
-                {EMOJI_LIST.map(emoji => (
+      {/* BOTTOM CONTROL AREA */}
+      {/* We use a 0-height absolute container at the bottom, then place items absolutely relative to it to ensure perfect alignment */}
+      <div className="absolute bottom-0 left-0 right-0 w-full h-0">
+          
+          {/* BOTTOM LEFT: Voice Control */}
+          <div className="absolute bottom-6 left-6 pointer-events-auto z-50">
+             <button
+                type="button"
+                onClick={onMicToggle}
+                className={`w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 ring-4 ${
+                  isListening 
+                    ? 'bg-red-500 text-white animate-pulse shadow-red-500/50 ring-red-300' 
+                    : 'bg-white text-gray-700 hover:bg-gray-50 ring-white/50 hover:scale-105'
+                }`}
+                title={isListening ? "Mute Microphone" : "Unmute Microphone"}
+              >
+                {isListening ? <Mic size={32} /> : <MicOff size={32} />}
+              </button>
+          </div>
+
+          {/* BOTTOM CENTER: Chat Input */}
+          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 w-full max-w-md pointer-events-auto z-50">
+              <div className="relative">
+                  {/* Emoji Picker Panel */}
+                  {showEmojiPicker && (
+                    <div className="absolute bottom-14 left-1/2 transform -translate-x-1/2 pointer-events-auto z-30 animate-in fade-in slide-in-from-bottom-4 duration-200">
+                        <div className="bg-white/90 backdrop-blur-xl p-3 rounded-2xl shadow-2xl border border-white/60 grid grid-cols-8 gap-1 w-64">
+                            {EMOJI_LIST.map(emoji => (
+                                <button
+                                    key={emoji}
+                                    onClick={() => handleEmojiClick(emoji)}
+                                    className="text-xl hover:scale-125 transition-transform p-1 hover:bg-white/50 rounded-lg active:scale-95"
+                                >
+                                    {emoji}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                  )}
+
+                  <form 
+                    onSubmit={handleSubmit} 
+                    className="w-full bg-white/90 backdrop-blur-xl rounded-2xl p-1.5 shadow-2xl flex gap-1.5 items-center border border-white/60"
+                  >
                     <button
-                        key={emoji}
-                        onClick={() => handleEmojiClick(emoji)}
-                        className="text-2xl hover:scale-125 transition-transform p-2 hover:bg-white/50 rounded-lg active:scale-95"
+                        type="button"
+                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                        className={`p-2 rounded-xl transition-colors flex-shrink-0 ${
+                            showEmojiPicker ? 'bg-garden-100 text-garden-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        }`}
+                        title="Open Emojis"
                     >
-                        {emoji}
+                        <Smile size={20} />
                     </button>
-                ))}
-            </div>
-            {/* Triangle pointer */}
-            <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[8px] border-t-white/90"></div>
-        </div>
-      )}
 
-      {/* Bottom Centered Input Area */}
-      <div className="absolute bottom-8 w-full flex justify-center pointer-events-auto px-4">
-        <form 
-          onSubmit={handleSubmit} 
-          className="w-full max-w-xl bg-white/90 backdrop-blur-xl rounded-full p-2 shadow-2xl flex gap-2 items-center border border-white/60 ring-1 ring-black/5 transition-transform hover:scale-[1.01]"
-        >
-          <button
-            type="button"
-            onClick={onMicToggle}
-            className={`p-3 rounded-full transition-all duration-300 flex-shrink-0 ${
-              isListening 
-                ? 'bg-red-500 text-white animate-pulse shadow-red-200 shadow-lg ring-2 ring-red-300' 
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800'
-            }`}
-            title="Toggle Microphone"
-          >
-            {isListening ? <Mic size={22} /> : <MicOff size={22} />}
-          </button>
-          
-          {/* Emoji Toggle */}
-          <button
-            type="button"
-            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-            className={`p-3 rounded-full transition-colors flex-shrink-0 ${
-                showEmojiPicker ? 'bg-garden-100 text-garden-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-            }`}
-            title="Open Emojis"
-          >
-            <Smile size={22} />
-          </button>
+                    <input
+                        type="text"
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        placeholder={nearbyNPC ? `Chat with ${nearbyNPC}...` : "Type message..."}
+                        className="flex-1 bg-transparent text-gray-900 placeholder-gray-500 border-none focus:ring-0 text-sm px-1 outline-none font-medium h-full min-w-0"
+                    />
+                    
+                    <button
+                        type="submit"
+                        disabled={!inputValue.trim()}
+                        className="p-2 bg-garden-600 text-white rounded-xl hover:bg-garden-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md transform active:scale-95 flex-shrink-0"
+                    >
+                        <Send size={18} strokeWidth={2.5} />
+                    </button>
+                  </form>
+              </div>
+          </div>
 
-          <input
-            type="text"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder={nearbyNPC ? `Say something to ${nearbyNPC}...` : "Type to chat..."}
-            className="flex-1 bg-transparent text-gray-900 placeholder-gray-500 border-none focus:ring-0 text-base px-2 outline-none font-medium h-full"
-          />
-          
-          <button
-            type="submit"
-            disabled={!inputValue.trim()}
-            className="p-3 bg-garden-600 text-white rounded-full hover:bg-garden-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md transform active:scale-95 flex-shrink-0"
-          >
-            <Send size={20} strokeWidth={2.5} />
-          </button>
-        </form>
+          {/* BOTTOM RIGHT: Chat History */}
+          <div className="absolute bottom-6 right-6 w-80 pointer-events-auto z-40">
+              {/* Chat History Container */}
+              <div className="bg-black/40 backdrop-blur-md p-3 rounded-2xl border border-white/20 h-48 overflow-y-auto flex flex-col gap-1.5 shadow-lg scrollbar-hide">
+                  {chatHistory.length === 0 && (
+                      <div className="text-white/50 text-xs text-center italic mt-auto">No messages yet. Say hello!</div>
+                  )}
+                  {chatHistory.map((msg) => (
+                      <div key={msg.id} className={`flex flex-col ${msg.isUser ? 'items-end' : 'items-start'}`}>
+                          <div className={`px-3 py-1.5 rounded-2xl text-sm max-w-[85%] break-words shadow-sm ${
+                              msg.isUser 
+                                ? 'bg-garden-500 text-white rounded-br-none' 
+                                : 'bg-white text-gray-800 rounded-bl-none'
+                          }`}>
+                              {msg.text}
+                          </div>
+                          <span className="text-[10px] text-white/70 px-1 mt-0.5">{msg.sender}</span>
+                      </div>
+                  ))}
+                  <div ref={chatEndRef} />
+              </div>
+          </div>
       </div>
     </div>
   );

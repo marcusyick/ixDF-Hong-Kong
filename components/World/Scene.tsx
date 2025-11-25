@@ -176,7 +176,7 @@ const FireworkLauncher: React.FC<{
             
             {/* Interaction Prompt */}
             {showPrompt && (
-                <Html position={[0, 1.8, 0]} center>
+                <Html position={[0, 1.8, 0]} center zIndexRange={[100, 0]}>
                     <div className="flex flex-col items-center animate-bounce">
                         <div className="bg-black/70 backdrop-blur-md text-white px-4 py-1.5 rounded-full text-sm font-bold border border-white/20 shadow-lg whitespace-nowrap flex items-center gap-2">
                             <span className="bg-white text-black w-5 h-5 rounded flex items-center justify-center text-xs font-extrabold">E</span>

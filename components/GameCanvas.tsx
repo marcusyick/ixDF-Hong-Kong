@@ -71,7 +71,7 @@ const Loader = () => {
 };
 
 const VoiceIndicator = () => (
-  <Html position={[0, 1.2, 0]} center transform={false}>
+  <Html position={[0, 1.2, 0]} center transform={false} zIndexRange={[100, 0]}>
      <div className="flex gap-0.5 items-end h-3 bg-white/80 p-1 rounded-md shadow-sm">
         <div className="w-1 bg-garden-500 animate-[bounce_0.8s_infinite] h-1.5" style={{animationDelay:'0ms'}}></div>
         <div className="w-1 bg-garden-500 animate-[bounce_0.8s_infinite] h-3" style={{animationDelay:'150ms'}}></div>
@@ -93,11 +93,18 @@ const AudioListenerController = ({ setListener }: { setListener: (l: THREE.Audio
     return null;
 };
 
-// Improved StreamAudio to handle autoplay policies
+// Improved StreamAudio to handle autoplay policies and Chrome WebRTC quirks
 const StreamAudio = ({ stream, listener }: { stream: MediaStream, listener: THREE.AudioListener }) => {
     const sound = useRef<THREE.PositionalAudio>(null);
     
     useEffect(() => {
+        // HACK: Create a hidden HTML Audio element to force the browser to decode the stream.
+        // This is often required in Chrome for WebAudio to receive data from a remote WebRTC stream.
+        const audioObj = new Audio();
+        audioObj.srcObject = stream;
+        audioObj.muted = true; // Muted in DOM so we only hear it via WebAudio/Three.js
+        audioObj.play().catch(e => console.warn("Audio tag playback failed (autoplay policy?)", e));
+
         if (sound.current && stream && listener) {
             // Ensure context is running
             if (listener.context.state === 'suspended') {
@@ -105,9 +112,14 @@ const StreamAudio = ({ stream, listener }: { stream: MediaStream, listener: THRE
             }
             // @ts-ignore
             sound.current.setMediaStreamSource(stream);
-            sound.current.setRefDistance(2);
-            sound.current.setRolloffFactor(1.5);
+            sound.current.setRefDistance(5); // Can be heard from further away
+            sound.current.setRolloffFactor(1); // Standard rolloff
             sound.current.setVolume(1);
+        }
+        
+        return () => {
+            audioObj.srcObject = null;
+            audioObj.remove();
         }
     }, [stream, listener]);
 
@@ -333,7 +345,7 @@ const PlayerController = ({
                 withShadow={false} 
             />
             {isMicOn && <VoiceIndicator />}
-            <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }}>
+            <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }} zIndexRange={[100, 0]}>
                 <div className="flex flex-col items-center w-48">
                     {displayedMsg && (
                         <div className="mb-2 bg-white text-gray-900 px-4 py-2 rounded-2xl shadow-xl border-2 border-garden-400 text-center font-medium text-sm relative animate-in fade-in zoom-in duration-200">
@@ -410,7 +422,7 @@ const RemotePeer: React.FC<RemotePeerProps> = ({
             />
             {data.isMicOn && <VoiceIndicator />}
             {stream && audioListener && <StreamAudio stream={stream} listener={audioListener} />}
-            <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }}>
+            <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }} zIndexRange={[100, 0]}>
                 <div className="flex flex-col items-center w-48">
                     {displayedMsg && (
                         <div className="mb-2 bg-white text-gray-900 px-4 py-2 rounded-2xl shadow-xl border-2 border-gray-300 text-center font-medium text-sm relative animate-in fade-in zoom-in duration-200">
@@ -480,7 +492,7 @@ const NPC: React.FC<NPCProps> = ({
                 accessory={data.accessory}
                 isMoving={false} 
              />
-             <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }}>
+             <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }} zIndexRange={[100, 0]}>
                  <div className="flex flex-col items-center w-48 gap-1">
                      {isInteracting && !displayedMsg && (
                         <div className="animate-bounce bg-white text-garden-600 p-1.5 rounded-full shadow-md border-2 border-garden-400 mb-1">
@@ -518,6 +530,29 @@ const INITIAL_COINS: CoinData[] = Array.from({ length: 40 }).map((_, i) => {
     return { id: `init-${i}`, position: [x, 1, z] };
 });
 
+const playCoinSound = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.1);
+    
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch(e) { console.error("Sound error", e); }
+};
+
 // Extracted Component for Coin Logic to run inside Canvas
 const CoinCollectionLogic = ({ 
     playerPosRef, 
@@ -550,7 +585,10 @@ const CoinCollectionLogic = ({
       }
 
       if (collectedCoinId) {
-          if (onCoinCollected) onCoinCollected();
+          if (onCoinCollected) {
+              onCoinCollected();
+              playCoinSound();
+          }
           
           // Update Local immediately to prevent double collection
           setCoins(prev => {
@@ -606,7 +644,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     user, 
     chatHistory, 
     nearbyNPC, 
-    setNearbyNPC,
+    setNearbyNPC, 
     broadcastMessage,
     onRemoteChat,
     micStream,
@@ -769,7 +807,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   useEffect(() => {
       if (onPlayerListUpdate) {
-          const names = Object.values(remotePeers).map(p => p.user.name);
+          // Explicitly type casting 'p' to fix TS error: Property 'user' does not exist on type 'unknown'
+          const names = Object.values(remotePeers).map((p: PlayerSyncData) => p.user.name);
           onPlayerListUpdate(names);
       }
   }, [remotePeers, onPlayerListUpdate]);
