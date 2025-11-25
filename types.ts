@@ -138,6 +138,7 @@ export interface PlayerSyncData {
   isMoving: boolean;
   isMicOn: boolean;
   timestamp: number;
+  followingId?: string | null; // ID of the player this user is following
 }
 
 export interface CoinData {

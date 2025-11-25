@@ -197,14 +197,18 @@ const PlayerController = ({
     playerPosRef,
     colliders,
     onUpdateState,
-    isMicOn
+    isMicOn,
+    followingId,
+    remotePeers
 }: { 
     user: UserState, 
     messages: ChatMessage[],
     playerPosRef: React.MutableRefObject<THREE.Vector3>,
     colliders: Collider[],
     onUpdateState?: (rot: number, isMoving: boolean) => void,
-    isMicOn: boolean
+    isMicOn: boolean,
+    followingId: string | null,
+    remotePeers: Record<string, PlayerSyncData>
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const shadowRef = useRef<THREE.Mesh>(null);
@@ -217,6 +221,7 @@ const PlayerController = ({
   
   const myLatestMsg = messages.filter(m => m.sender === user.name).pop();
   const [displayedMsg, setDisplayedMsg] = useState<string | null>(null);
+  const [closestPeerName, setClosestPeerName] = useState<string | null>(null);
   
   useEffect(() => {
       if (myLatestMsg) {
@@ -225,6 +230,24 @@ const PlayerController = ({
           return () => clearTimeout(t);
       }
   }, [myLatestMsg]);
+
+  // Determine closest peer for UI Prompt
+  useFrame(() => {
+      if (!groupRef.current) return;
+      const myPos = groupRef.current.position;
+      let closest: string | null = null;
+      let minDist = 3.5;
+
+      Object.values(remotePeers).forEach(peer => {
+          const peerPos = new THREE.Vector3(...peer.position);
+          const dist = myPos.distanceTo(peerPos);
+          if (dist < minDist) {
+              minDist = dist;
+              closest = peer.user.name;
+          }
+      });
+      setClosestPeerName(closest);
+  });
 
   const checkCollision = (pos: THREE.Vector3) => {
       const PLAYER_RADIUS = 0.5;
@@ -242,48 +265,81 @@ const PlayerController = ({
   useFrame((state, delta) => {
     if (!groupRef.current) return;
 
-    const speed = shift ? 7 : 4;
-    const moveDir = new THREE.Vector3(0, 0, 0);
-    
-    if (forward || backward || left || right) {
-        const camDir = new THREE.Vector3();
-        camera.getWorldDirection(camDir);
-        camDir.y = 0;
-        camDir.normalize();
-        const camRight = new THREE.Vector3();
-        camRight.crossVectors(camera.up, camDir).normalize();
+    let moveDir = new THREE.Vector3(0, 0, 0);
+    let moving = false;
+
+    // --- MOVEMENT LOGIC ---
+    if (followingId && remotePeers[followingId]) {
+        // Follow Mode
+        const targetPeer = remotePeers[followingId];
+        const targetPos = new THREE.Vector3(...targetPeer.position);
+        const myPos = groupRef.current.position.clone();
         
-        if (forward) moveDir.add(camDir);
-        if (backward) moveDir.sub(camDir);
-        if (right) moveDir.sub(camRight); 
-        if (left) moveDir.add(camRight);
+        const dist = myPos.distanceTo(targetPos);
+        const followDist = 1.5; // Distance to keep behind
         
-        if (moveDir.length() > 0) {
-            moveDir.normalize().multiplyScalar(speed * delta);
-            const currentPos = groupRef.current.position.clone();
-            const potentialPos = currentPos.clone().add(moveDir);
+        if (dist > followDist) {
+            // Move towards target
+            const direction = new THREE.Vector3().subVectors(targetPos, myPos).normalize();
+            // Simple lerp for smooth following
+            const speed = 6;
+            const step = direction.multiplyScalar(speed * delta);
             
+            // Look at target
+            const lookAtPos = targetPos.clone();
+            lookAtPos.y = myPos.y; // Keep looking horizontal
+            groupRef.current.lookAt(lookAtPos);
+            
+            // Check collision before moving
+            const potentialPos = myPos.clone().add(step);
             if (!checkCollision(potentialPos)) {
-                groupRef.current.position.add(moveDir);
-            } else {
-                const tryX = currentPos.clone().add(new THREE.Vector3(moveDir.x, 0, 0));
-                if (!checkCollision(tryX)) {
-                    groupRef.current.position.add(new THREE.Vector3(moveDir.x, 0, 0));
-                } else {
-                    const tryZ = currentPos.clone().add(new THREE.Vector3(0, 0, moveDir.z));
-                    if (!checkCollision(tryZ)) {
-                        groupRef.current.position.add(new THREE.Vector3(0, 0, moveDir.z));
-                    }
-                }
+                 groupRef.current.position.add(step);
+                 moving = true;
             }
-            
-            const angle = Math.atan2(moveDir.x, moveDir.z);
-            groupRef.current.rotation.y = angle; 
-            setIsMoving(true);
         }
     } else {
-        setIsMoving(false);
+        // Manual Control Mode
+        const speed = shift ? 7 : 4;
+        if (forward || backward || left || right) {
+            const camDir = new THREE.Vector3();
+            camera.getWorldDirection(camDir);
+            camDir.y = 0;
+            camDir.normalize();
+            const camRight = new THREE.Vector3();
+            camRight.crossVectors(camera.up, camDir).normalize();
+            
+            if (forward) moveDir.add(camDir);
+            if (backward) moveDir.sub(camDir);
+            if (right) moveDir.sub(camRight); 
+            if (left) moveDir.add(camRight);
+            
+            if (moveDir.length() > 0) {
+                moveDir.normalize().multiplyScalar(speed * delta);
+                const currentPos = groupRef.current.position.clone();
+                const potentialPos = currentPos.clone().add(moveDir);
+                
+                if (!checkCollision(potentialPos)) {
+                    groupRef.current.position.add(moveDir);
+                } else {
+                    const tryX = currentPos.clone().add(new THREE.Vector3(moveDir.x, 0, 0));
+                    if (!checkCollision(tryX)) {
+                        groupRef.current.position.add(new THREE.Vector3(moveDir.x, 0, 0));
+                    } else {
+                        const tryZ = currentPos.clone().add(new THREE.Vector3(0, 0, moveDir.z));
+                        if (!checkCollision(tryZ)) {
+                            groupRef.current.position.add(new THREE.Vector3(0, 0, moveDir.z));
+                        }
+                    }
+                }
+                
+                const angle = Math.atan2(moveDir.x, moveDir.z);
+                groupRef.current.rotation.y = angle; 
+                moving = true;
+            }
+        }
     }
+
+    setIsMoving(moving);
 
     const raycaster = new THREE.Raycaster();
     const rayOrigin = groupRef.current.position.clone().add(new THREE.Vector3(0, 20, 0));
@@ -306,7 +362,7 @@ const PlayerController = ({
     if (groupRef.current.position.y <= groundHeight) {
         groupRef.current.position.y = groundHeight;
         velocityY.current = 0;
-        if (jump) velocityY.current = JUMP_FORCE;
+        if (jump && !followingId) velocityY.current = JUMP_FORCE; // Can't jump while following
     }
 
     playerPosRef.current.copy(groupRef.current.position);
@@ -345,7 +401,28 @@ const PlayerController = ({
                 withShadow={false} 
             />
             {isMicOn && <VoiceIndicator />}
-            <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }} zIndexRange={[100, 0]}>
+            
+            {/* Follow Prompt UI */}
+            {!followingId && closestPeerName && (
+                <Html position={[0, 1.8, 0]} center zIndexRange={[100, 0]}>
+                    <div className="flex flex-col items-center animate-bounce">
+                        <div className="bg-garden-600/90 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg border border-white/30 whitespace-nowrap">
+                            Press F to follow {closestPeerName}
+                        </div>
+                    </div>
+                </Html>
+            )}
+            {followingId && (
+                <Html position={[0, 1.8, 0]} center zIndexRange={[100, 0]}>
+                    <div className="flex flex-col items-center animate-bounce">
+                        <div className="bg-red-500/90 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg border border-white/30 whitespace-nowrap">
+                            Following {remotePeers[followingId]?.user.name} (F to Stop)
+                        </div>
+                    </div>
+                </Html>
+            )}
+
+            <Html position={[0, 2.2, 0]} center style={{ pointerEvents: 'none' }} zIndexRange={[100, 0]}>
                 <div className="flex flex-col items-center w-48">
                     {displayedMsg && (
                         <div className="mb-2 bg-white text-gray-900 px-4 py-2 rounded-2xl shadow-xl border-2 border-garden-400 text-center font-medium text-sm relative animate-in fade-in zoom-in duration-200">
@@ -659,6 +736,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const [peerStreams, setPeerStreams] = useState<Record<string, MediaStream>>({});
   const [ballState, setBallState] = useState<{ velocity: number[], position: number[], timestamp: number } | null>(null);
   
+  // Follow System State
+  const [followingId, setFollowingId] = useState<string | null>(null);
+
   // Synced Game State
   const [coins, setCoins] = useState<CoinData[]>(INITIAL_COINS);
   const coinsRef = useRef(INITIAL_COINS); // Use ref for physics checks loop
@@ -670,6 +750,46 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // Fix 1: Use a Ref for User to ensure Sync Loop grabs the latest prop (Accessory changes)
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
+  
+  // Use a Ref for remotePeers to access in keydown listener without re-binding
+  const remotePeersRef = useRef(remotePeers);
+  useEffect(() => { remotePeersRef.current = remotePeers; }, [remotePeers]);
+  
+  // Follow Input Listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'f' || e.key === 'F') {
+            setFollowingId(currentFollowingId => {
+                if (currentFollowingId) {
+                    return null; // Unfollow
+                } else {
+                    // Try to Follow
+                    const myPos = playerPosRef.current;
+                    let minDist = 3.5; 
+                    let targetId: string | null = null;
+
+                    Object.values(remotePeersRef.current).forEach(peer => {
+                        const peerPos = new THREE.Vector3(...peer.position);
+                        const dist = myPos.distanceTo(peerPos);
+                        if (dist < minDist) {
+                            minDist = dist;
+                            targetId = peer.id;
+                        }
+                    });
+
+                    // Prevent circular dependency (basic check: if they are following me)
+                    // Note: 'me' ID logic is tricky without knowing my own network ID, 
+                    // but we can at least check if the target is following *someone*.
+                    // If target is already following someone, we can still join the line (Conga line!)
+                    // So we just check if targetId exists.
+                    return targetId;
+                }
+            });
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
       // Clean up previous room if any (Strict mode safety)
@@ -738,7 +858,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               rotation: rotationRef.current,
               isMoving: isMovingRef.current,
               isMicOn: !!micStream,
-              timestamp: Date.now()
+              timestamp: Date.now(),
+              // Note: We can't easily sync followingId in sendState because `followingId` is a local state referencing a peer ID,
+              // and `sendState` doesn't have access to the closure of `followingId` inside this interval unless we use a Ref.
+              // However, visual sync is achieved because `PlayerController` updates `position` based on follow logic, 
+              // and that `position` is sent here. Explicitly sending `followingId` is optional for visual sync.
+              // We will add it if we want to show connection lines or debug info remotely.
           };
           sendState(myData);
       }, 50);
@@ -874,6 +999,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               colliders={colliders}
               onUpdateState={handleLocalUpdate}
               isMicOn={!!micStream}
+              followingId={followingId}
+              remotePeers={remotePeers}
            />
            
             <KickableBall 
