@@ -241,7 +241,7 @@ const PlayerController = ({
       let closest: string | null = null;
       let minDist = 3.5;
 
-      Object.values(remotePeers).forEach(peer => {
+      Object.values(remotePeers).forEach((peer: any) => {
           const peerPos = new THREE.Vector3(...peer.position);
           const dist = myPos.distanceTo(peerPos);
           if (dist < minDist) {
@@ -691,6 +691,9 @@ const CoinCollectionLogic = ({
 
           // 2. Wait and Respawn (Hostless responsibility)
           setTimeout(() => {
+              // Check if we are over the limit before spawning a new one
+              if (coinsRef.current.length >= 50) return;
+
               const x = (Math.random() - 0.5) * 80;
               const z = (Math.random() - 0.5) * 80;
               if (Math.abs(x) > 5 || Math.abs(z) > 5) {

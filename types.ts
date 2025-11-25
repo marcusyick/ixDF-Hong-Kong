@@ -1,4 +1,4 @@
-import { ThreeElements } from '@react-three/fiber';
+import React from 'react';
 
 // Explicitly define IntrinsicElements for Three.js to prevent TypeScript errors
 // when the automatic type inference from @react-three/fiber fails or is incomplete.
@@ -12,6 +12,7 @@ declare global {
       object3D: any;
       instancedMesh: any;
       primitive: any;
+      points: any;
 
       // Geometries
       bufferGeometry: any;
@@ -32,6 +33,9 @@ declare global {
       extrudeGeometry: any;
       shapeGeometry: any;
       torusKnotGeometry: any;
+      
+      // Attributes
+      bufferAttribute: any;
 
       // Materials
       meshBasicMaterial: any;
@@ -47,6 +51,7 @@ declare global {
       shaderMaterial: any;
       shadowMaterial: any;
       spriteMaterial: any;
+      MeshDistortMaterial: any;
 
       // Lights
       ambientLight: any;
